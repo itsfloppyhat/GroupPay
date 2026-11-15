@@ -59,18 +59,18 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         // Simulator builds can run without CloudKit entitlements. Do not instantiate
         // CKContainer there: its entitlement assertion is an Objective-C exception.
         #if targetEnvironment(simulator)
-        throw Failure.unavailable("iCloud sharing needs a developer-signed installation on an iPhone or iPad. You can explore the read-only preview in Simulator.")
+        throw Failure.unavailable("To share bills and approve payments, open Group Pay on an iPhone or iPad. You can explore sample bills here.")
         #else
         do {
             guard !ProcessInfo.processInfo.arguments.contains("--preview") else {
-                throw Failure.unavailable("This launch is a read-only preview. Launch the signed app normally to connect iCloud.")
+                throw Failure.unavailable("You’re viewing sample bills. Reopen Group Pay to connect your iCloud account.")
             }
             let requestedEpoch = accountEpoch
             let status = try await container.accountStatus()
             try validateSession(requestedEpoch)
             guard status == .available else {
                 if currentUserID != nil { invalidateAccount() }
-                throw Failure.unavailable("Sign in to iCloud in Settings to use your own Group Pay account. iCloud Drive must be available, and this app must be signed with CloudKit enabled.")
+                throw Failure.unavailable("Sign in to iCloud and turn on iCloud Drive in Settings, then try again.")
             }
             let id = try await container.userRecordID().recordName
             try validateSession(requestedEpoch)
@@ -223,7 +223,7 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     func accept(_ metadata: CKShare.Metadata) async throws {
         do {
             guard metadata.containerIdentifier == Self.containerIdentifier else {
-                throw Failure.unavailable("This invitation belongs to a different app or CloudKit container.")
+                throw Failure.unavailable("This invitation isn’t for Group Pay. Ask the bill’s owner for a new invitation.")
             }
             _ = try await account()
             let epoch = accountEpoch
@@ -417,23 +417,26 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     }
 
     private func readable(_ error: Error) -> Error {
-        guard let cloudError = error as? CKError else { return error }
+        if error is Failure || error is BillError { return error }
+        if error is DecodingError || error is EncodingError { return Failure.invalidData }
+        let unavailable = Failure.unavailable("We couldn’t update your bills in iCloud. Try again in a moment.")
+        guard let cloudError = error as? CKError else { return unavailable }
         switch cloudError.code {
         case .notAuthenticated:
             return Failure.unavailable("Sign in to iCloud in Settings, then reconnect your account.")
         case .badContainer, .missingEntitlement, .badDatabase:
-            return Failure.unavailable("CloudKit needs Apple developer setup. Select your team in Xcode, enable the Group Pay iCloud container and Push Notifications, then install the signed app on your device.")
+            return Failure.unavailable("Group Pay couldn’t connect to iCloud. Update or reinstall the app, then try again.")
         case .serverRecordChanged:
             return Failure.unavailable("This bill changed on another device. Refresh and review the current amounts before trying again.")
         case .permissionFailure:
             return Failure.unavailable("You no longer have permission to change this bill. Ask its owner to check your invitation and sharing access.")
         case .networkUnavailable, .networkFailure, .serviceUnavailable:
-            return Failure.unavailable("iCloud is temporarily unavailable. Check your connection and try again. No payment was made.")
+            return Failure.unavailable("iCloud is temporarily unavailable. Check your connection and try again.")
         case .partialFailure:
             if let nested = cloudError.partialErrorsByItemID?.values.first { return readable(nested) }
-            return cloudError
+            return unavailable
         default:
-            return cloudError
+            return unavailable
         }
     }
 
@@ -452,7 +455,7 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     }
 
     static func report(_ error: Error) {
-        NotificationCenter.default.post(name: .groupPayCloudError, object: nil, userInfo: ["message": error.localizedDescription])
+        NotificationCenter.default.post(name: .groupPayCloudError, object: nil, userInfo: ["message": shared.readable(error).localizedDescription])
     }
 }
 
@@ -492,7 +495,7 @@ final class GroupPayAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        CloudService.report(error)
+        CloudService.report(CloudService.Failure.unavailable("Notifications are unavailable right now. Open Group Pay to check for updates."))
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

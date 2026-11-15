@@ -31,6 +31,7 @@ struct NewBillView: View {
     @State private var detectedTotal: Int?
     @State private var totalVerified = false
     @State private var reviewed = false
+    @ScaledMetric(relativeTo: .largeTitle) private var reviewTotalSize = 46.0
 
     private var draft: Bill {
         var people = members
@@ -57,7 +58,7 @@ struct NewBillView: View {
                     HStack(spacing: 8) {
                         ForEach(0..<3) { index in Capsule().fill(index <= step ? GP.mint : GP.raised).frame(height: 4) }
                     }
-                    PageHeading(overline: "Step \(step + 1) of 3", title: ["Start with the bill.", "Find everyone’s part.", "Good to share?"][step])
+                    PageHeading(overline: "Step \(step + 1) of 3 · \(["The receipt", "Your group", "Review"][step])", title: ["Start with the bill", "Everyone’s part", "Ready to share?"][step])
                     if step == 0 { receiptStep }
                     else if step == 1 { peopleStep }
                     else { reviewStep }
@@ -93,30 +94,40 @@ struct NewBillView: View {
         VStack(alignment: .leading, spacing: 22) {
             if lines.isEmpty {
                 VStack(spacing: 18) {
-                    Image(systemName: "doc.viewfinder").font(.system(size: 62, weight: .ultraLight)).foregroundStyle(GP.mint).padding(.top, 16)
-                    Text("Less math. More moments.").font(.title3.bold())
-                    Text("Scan a restaurant receipt or groceries.\nYou’ll review every item before sharing.")
+                    Image(systemName: "doc.viewfinder")
+                        .font(.system(size: 40, weight: .light)).foregroundStyle(GP.mint)
+                        .frame(width: 96, height: 96)
+                        .background(GP.mint.opacity(0.06), in: RoundedRectangle(cornerRadius: 28))
+                        .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(GP.mint.opacity(0.12)))
+                        .padding(.top, 8)
+                    Text("Bring your receipt").font(.title3.weight(.semibold))
+                    Text("Dinner, groceries, or something shared.\nScan it, then check the details.")
                         .font(.subheadline).foregroundStyle(GP.secondary).multilineTextAlignment(.center)
                     Button { showCamera = true } label: { Label("Scan a receipt", systemImage: "camera") }.buttonStyle(PrimaryButton()).disabled(!ReceiptCamera.isSupported || scanning)
                     PhotosPicker(selection: $photo, matching: .images) { Label("Choose a receipt photo", systemImage: "photo") }.font(.subheadline.bold()).disabled(scanning)
-                    if !ReceiptCamera.isSupported { Text("Camera scanning is available on supported iPhones and iPads. Import a photo or try a sample here.").font(.caption).foregroundStyle(GP.secondary).multilineTextAlignment(.center) }
-                    if scanning { ProgressView("Reading receipt on this device…").font(.caption) }
+                    if !ReceiptCamera.isSupported { Text("Camera unavailable. Choose a photo or try a sample receipt.").font(.caption).foregroundStyle(GP.secondary).multilineTextAlignment(.center) }
+                    if scanning { ProgressView("Reading your receipt…").font(.caption) }
                 }.padding(24).frame(maxWidth: .infinity).background(GP.surface, in: RoundedRectangle(cornerRadius: 24))
                 HStack(spacing: 12) {
-                    sampleButton("Dinner receipt", symbol: "fork.knife", groceries: false)
-                    sampleButton("Grocery receipt", symbol: "basket", groceries: true)
+                    sampleButton("Dinner", symbol: "fork.knife", groceries: false)
+                    sampleButton("Groceries", symbol: "basket", groceries: true)
                 }
                 Button("Enter a bill manually") { lines = [ReceiptLine()]; title = "" }.font(.subheadline).foregroundStyle(GP.secondary).frame(maxWidth: .infinity)
             } else {
                 Panel {
                     Eyebrow(text: "Receipt details")
-                    TextField("Restaurant or bill name", text: $title).font(.title3.bold()).gpField()
+                    TextField("Restaurant or bill name", text: $title).font(.title3.weight(.semibold)).gpField()
                     Picker("Category", selection: $category) { ForEach(BillCategory.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+                    HStack {
+                        Text("ITEM")
+                        Spacer()
+                        Text("USD").padding(.trailing, 28)
+                    }.font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1.5).foregroundStyle(GP.secondary).padding(.top, 8)
                     ForEach($lines) { $line in
                         HStack {
-                            TextField("Item name", text: $line.name)
-                            TextField("0.00", text: $line.amount).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80)
-                            Button { lines.removeAll { $0.id == line.id } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary) }.accessibilityLabel("Remove \(line.name)")
+                            TextField("Item name", text: $line.name).accessibilityLabel("Item name")
+                            TextField("0.00", text: $line.amount).accessibilityLabel("Item price in dollars").keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80)
+                            Button { lines.removeAll { $0.id == line.id } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Remove \(line.name)")
                         }.font(.subheadline).padding(.vertical, 9)
                         Divider()
                     }
@@ -129,14 +140,14 @@ struct NewBillView: View {
                 if totalMismatch {
                     Panel {
                         Label("Check the total", systemImage: "exclamationmark.triangle").foregroundStyle(GP.amber).font(.headline)
-                        Text("The receipt shows \(Money.string(cents: detectedTotal ?? 0)); your edited items, tax, and tip total \(Money.string(cents: draft.totalCents)). Correct missed items or discounts before continuing.").font(.subheadline).foregroundStyle(GP.secondary)
+                        Text("Receipt: \(Money.string(cents: detectedTotal ?? 0)). Your total: \(Money.string(cents: draft.totalCents)). Check for missed items or discounts before continuing.").font(.subheadline).foregroundStyle(GP.secondary)
                         Toggle("I verified the corrected total", isOn: $totalVerified).font(.subheadline)
                     }
                 }
                 if !rawText.isEmpty {
-                    DisclosureGroup("Recognized receipt text") { Text(rawText).font(.caption.monospaced()).foregroundStyle(GP.secondary).textSelection(.enabled).padding(.top, 10) }.font(.subheadline).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
+                    DisclosureGroup("Original receipt text") { Text(rawText).font(.caption.monospaced()).foregroundStyle(GP.secondary).textSelection(.enabled).padding(.top, 10) }.font(.subheadline).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
                 }
-                Text("Review item names, prices, tax, and tip. Receipt recognition may miss discounts or misread numbers.").font(.caption).foregroundStyle(GP.secondary)
+                Text("Check prices, discounts, tax, and tip before continuing. Scans can occasionally miss a detail.").font(.caption).foregroundStyle(GP.secondary)
             }
         }
     }
@@ -145,32 +156,32 @@ struct NewBillView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: symbol).font(.title3).foregroundStyle(GP.mint)
                 Text(title).font(.subheadline.bold()).foregroundStyle(.white)
-                Text("TRY A SAMPLE").font(.system(size: 8, weight: .bold, design: .monospaced)).tracking(1).foregroundStyle(GP.secondary)
+                Text("Sample receipt").font(.caption).foregroundStyle(GP.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 20))
         }
     }
     private var peopleStep: some View {
         VStack(alignment: .leading, spacing: 22) {
             Panel {
-                Eyebrow(text: "Who’s in?")
+                Eyebrow(text: "Your group")
                 ForEach(Array(members.indices), id: \.self) { index in
                     HStack {
                         Avatar(name: index == 0 ? store.name : members[index].name, index: index)
-                        if index == 0 { Text("\(store.name) (you)").font(.subheadline); Spacer(); Text("Leader").font(.caption).foregroundStyle(GP.mint) }
+                        if index == 0 { Text(store.name == "You" ? "You" : "\(store.name) (you)").font(.subheadline); Spacer(); Text("Leader").font(.caption).foregroundStyle(GP.mint) }
                         else {
                             TextField("Their name", text: $members[index].name).textContentType(.name).font(.subheadline)
-                            Button { let id = members[index].id; members.remove(at: index); for i in lines.indices { lines[i].assigneeIDs.removeAll { $0 == id } } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary) }.accessibilityLabel("Remove person")
+                            Button { let id = members[index].id; members.remove(at: index); for i in lines.indices { lines[i].assigneeIDs.removeAll { $0 == id } } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Remove person")
                         }
                     }.padding(.vertical, 5)
                 }
                 Button { members.append(BillMember(name: "")) } label: { Label("Add a person", systemImage: "person.badge.plus") }.font(.subheadline.bold()).disabled(members.count >= 50)
-                Text("After creating the split, invite these people through iCloud. They’ll join and approve on their own devices.").font(.caption).foregroundStyle(GP.secondary)
+                Text("You’ll send invitations after creating the split.").font(.caption).foregroundStyle(GP.secondary)
             }
             Panel {
-                Eyebrow(text: "Make it fair")
+                Eyebrow(text: "How to split")
                 Picker("Split method", selection: $method) { ForEach(SplitMethod.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.menu).tint(GP.mint)
                 if method == .equal {
-                    Text("The total, including tax and tip, is shared equally. Any extra cent is allocated in group order.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("Share the full total equally, including tax and tip. Rounding is handled automatically.").font(.subheadline).foregroundStyle(GP.secondary)
                 } else if method == .custom {
                     Text("Enter each person’s final amount, including tax and tip.").font(.caption).foregroundStyle(GP.secondary)
                     ForEach(Array(members.enumerated()), id: \.element.id) { index, member in
@@ -197,11 +208,11 @@ struct NewBillView: View {
                 }
             }
             Panel {
-                Label("Make it a regular thing", systemImage: "repeat").font(.headline)
+                Label("Repeat this bill", systemImage: "repeat").font(.headline)
                 Picker("Repeat", selection: $recurrence) { ForEach(Recurrence.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
                 if recurrence != .none {
                     DatePicker("Next due", selection: $nextDue, in: Date.now..., displayedComponents: .date).font(.subheadline)
-                    Text("The leader starts each new cycle. Everyone approves again before another demo card is created.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Start each cycle when you’re ready. Everyone approves again.").font(.caption).foregroundStyle(GP.secondary)
                 }
             }
             if let validation = draft.validationMessage { Text(validation).font(.caption).foregroundStyle(GP.amber) }
@@ -215,7 +226,7 @@ struct NewBillView: View {
                 else { line.wrappedValue.assigneeIDs.append(member.id) }
             } label: {
                 Text(index == 0 ? "You" : member.name.isEmpty ? "Person \(index + 1)" : member.name)
-                    .font(.caption.bold()).padding(.horizontal, 11).padding(.vertical, 9)
+                    .font(.caption.bold()).padding(.horizontal, 11).padding(.vertical, 9).frame(minWidth: 44, minHeight: 44)
                     .foregroundStyle(selected ? GP.background : GP.secondary).background(selected ? GP.mint : GP.raised, in: Capsule())
             }.accessibilityAddTraits(selected ? .isSelected : [])
         }
@@ -223,8 +234,16 @@ struct NewBillView: View {
     private var reviewStep: some View {
         VStack(alignment: .leading, spacing: 22) {
             Panel {
-                HStack { Image(systemName: category.systemImage).foregroundStyle(GP.mint); Text(title).font(.headline); Spacer() }
-                Text(Money.string(cents: draft.totalCents)).font(.system(size: 42, weight: .medium, design: .rounded)).tracking(-1)
+                HStack(spacing: 12) {
+                    Image(systemName: category.systemImage).foregroundStyle(GP.mint)
+                        .frame(width: 40, height: 40).background(GP.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title).font(.headline)
+                        Text(category.rawValue).font(.caption).foregroundStyle(GP.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                Text(Money.string(cents: draft.totalCents)).font(.system(size: reviewTotalSize, weight: .medium, design: .rounded)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.7).padding(.top, 4)
                 Text("\(method.rawValue) · \(recurrence.rawValue) · USD").font(.caption).foregroundStyle(GP.secondary)
                 Divider()
                 ForEach(Array(draft.members.enumerated()), id: \.element.id) { index, member in
@@ -237,18 +256,34 @@ struct NewBillView: View {
                 }
             }
             Panel {
-                Label("Here’s what happens next", systemImage: "arrow.triangle.branch").font(.headline)
-                Text(store.sandboxIssuingEnabled ? "1. Invite your group through iCloud.\n2. Each person reviews and approves their part.\n3. You confirm and issue a funded sandbox card.\n4. Inspect the test card in the app and Marqeta." : "1. Invite your group through iCloud.\n2. Each person reviews and approves their part.\n3. You confirm and create one demo card.\n4. Simulate paying the full bill.").font(.subheadline).lineSpacing(8).foregroundStyle(GP.secondary)
+                Text("What happens next").font(.headline)
+                VStack(alignment: .leading, spacing: 18) {
+                    nextStep("1", title: "Invite your group", detail: "Everyone receives their own portion.")
+                    nextStep("2", title: "Everyone approves", detail: "Each person reviews the bill before agreeing.")
+                    nextStep("3", title: "Create one test card", detail: "You confirm once the whole group is ready.")
+                }.padding(.vertical, 4)
+                Divider()
                 Toggle("I reviewed the receipt and everyone’s portion", isOn: $reviewed).font(.subheadline).tint(GP.mint)
             }
-            if !store.connected { Text("Connect iCloud from Profile before creating this split. Sample receipts can be explored without an account.").font(.subheadline).foregroundStyle(GP.amber) }
-            Text("Creating this split approves your own portion. All money and cards are simulated.").font(.caption).foregroundStyle(GP.secondary)
+            if !store.connected { Text("Sign in from Profile to create this split and invite your group.").font(.subheadline).foregroundStyle(GP.amber) }
+            Text("Creating this split also approves your portion.").font(.caption).foregroundStyle(GP.secondary)
+            Text("Test mode · No real money").font(.caption).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.top, 4)
+        }
+    }
+    private func nextStep(_ number: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number).font(.caption.weight(.semibold)).foregroundStyle(GP.mint)
+                .frame(width: 26, height: 26).background(GP.mint.opacity(0.08), in: Circle())
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(GP.secondary)
+            }
         }
     }
     private var footer: some View {
         VStack(spacing: 10) {
             if step < 2 {
-                Button(step == 0 ? "Next · Add your people" : "Review the split") { step += 1 }
+                Button(step == 0 ? "Continue to your group" : "Review the split") { step += 1 }
                     .buttonStyle(PrimaryButton())
                     .disabled(step == 0 ? (!receiptValid || scanning || (totalMismatch && !totalVerified)) : draft.validationMessage != nil)
             } else {

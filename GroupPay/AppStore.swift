@@ -135,7 +135,7 @@ final class AppStore {
             guard let expected = bills.first(where: { $0.id == id }) else { return }
             let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
                 guard bill.cycle == expected.cycle, bill.totalCents == expected.totalCents, bill.shares == expected.shares else {
-                    throw NSError(domain: "GroupPay", code: 409, userInfo: [NSLocalizedDescriptionKey: "This bill has changed. Refresh and review the latest amounts before continuing."])
+                    throw BillError("This bill has changed. Refresh and review the latest amounts before continuing.")
                 }
                 try action(&bill, accountID)
             }
@@ -172,7 +172,7 @@ final class AppStore {
                     return // An earlier attachment committed but its reply was lost.
                 }
                 if let original = bill.sandboxBackendID, original != backendID {
-                    throw BillError("This bill started issuing through a different sandbox backend. Restore that connection to recover its original card.")
+                    throw BillError("This bill started with a different card connection. Restore the original connection in settings to finish creating its card.")
                 }
                 try bill.reserveSandboxCard(accountID: accountID)
                 bill.sandboxBackendID = backendID
@@ -185,7 +185,7 @@ final class AppStore {
             // to iCloud fails, repeating this request retrieves the same funded card.
             let currentBackendID = SHA256.hash(data: Data(SandboxCardService.shared.baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
             guard currentBackendID == backendID else {
-                throw BillError("The sandbox connection changed while reserving this bill. Restore the original connection, then resume card creation.")
+                throw BillError("Your card connection changed. Restore the original connection in settings, then resume card creation.")
             }
             let issued = try await SandboxCardService.shared.issue(for: reserved)
             guard token == session else { return }
@@ -196,7 +196,7 @@ final class AppStore {
                                    providerState: issued.state)
             let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
                 guard bill.cycle == reserved.cycle, bill.totalCents == reserved.totalCents, bill.shares == reserved.shares else {
-                    throw BillError("The bill changed while the sandbox card was being issued. Contact the leader before continuing.")
+                    throw BillError("The bill changed while its test card was being created. Check with the leader before continuing.")
                 }
                 try bill.attachSandboxCard(accountID: accountID, card: card)
             }

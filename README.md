@@ -14,7 +14,7 @@ A native SwiftUI group-payment prototype. Scan a receipt, split the total, invit
 - Weekly/monthly schedules. The leader starts each cycle; participant approvals reset and the prior card is discarded. No automatic funding. Authorized local reminders prompt the leader at the next due date.
 - Real CloudKit background-push registration plus local update banners, foreground refresh, and an inbox of pending approvals.
 - Private data stays in the owner's private CloudKit database and invitees' shared databases. No public database or public-read share links.
-- Dark, mint-accented Overview, Inbox, Cards, Profile, creation, receipt, and bill-detail screens. An explicitly read-only preview is available without iCloud.
+- Evergreen and mint Home, Inbox, Cards, Profile, creation, receipt, and bill-detail screens with native artwork, scalable typography, and concise customer-facing messages. An explicitly read-only preview is available without iCloud. Connection controls live under Advanced settings in Debug builds.
 
 ## Requirements and opening
 
@@ -51,7 +51,7 @@ Shared CloudKit database subscriptions deliver background change pushes. When iO
 2. Run `python3 sandbox_backend/setup.py --credentials` from this repository. Enter the sandbox URL, application token, and admin access token in the local terminal. Token entry is hidden; `.env` is private and excluded from Git.
 3. Run `python3 sandbox_backend/server.py` and leave it running.
 4. Build and install the Debug app in the simulator with normal Xcode signing enabled (do not set `CODE_SIGNING_ALLOWED=NO`; the simulator needs its generated Keychain entitlements). Run `python3 sandbox_backend/configure_simulator.py --device <simulator-UDID>` to save its local connection token without copying secrets into chat. With exactly one running simulator, omit `--device`.
-5. In Group Pay, open **Profile → Configure sandbox → Save & check connection**. Choose **Issue a $10 test card**. This uses explicitly fictional participants, so it works without iCloud in the simulator. Retries recover the same request. Only the last four digits and initial test funding are shown.
+5. In the Debug build of Group Pay, open **Profile → Advanced settings → Card connection → Save & check connection**. Choose **Create $10 test card**. This uses explicitly fictional participants, so it works without iCloud in the simulator. Retries recover the same request. Only the last four digits and initial test funding are shown.
 
 For a shared bill, sandbox mode replaces the leader's final demo-card confirmation with backend issuance. The bill locks while issuance is pending; **Resume card creation** retrieves the original result after an interruption. Provider cards cannot use the local simulated-payment button. Merchant transactions, live balance reconciliation, and completing recurring cycles with Marqeta cards are not implemented yet.
 
@@ -74,7 +74,7 @@ The following are verified locally:
 - 22 offline backend tests: authentication, sandbox endpoint restrictions, exact amounts, masked responses, durable retries, timeout recovery, and prevention of duplicate funding. These use a mock provider and do not prove live Marqeta access.
 - Live Marqeta sandbox test on November 14, 2026: the iPhone 18 Pro Max simulator issued an active virtual card with $10.00 in test funding. Replaying the same approved request returned the identical card without another provider create or funding attempt.
 - Receipt parser fixtures and Swift 6 type-check.
-- Simulator UI flow: overview, receipt sample/editing, people, invalid/valid custom allocations, and final review. A missing sheet environment discovered during this check was fixed and retested.
+- Simulator UI flow: Home, Inbox, Cards, Profile, advanced connection access, bill details, receipt samples/editing, participant entry, and final review. Invalid/valid custom allocations were checked during the original build. The refreshed UI was inspected on the iPhone 18 Pro Max simulator.
 
 Run domain checks:
 

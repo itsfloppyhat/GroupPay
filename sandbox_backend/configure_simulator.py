@@ -26,7 +26,7 @@ def main():
     if result.returncode:
         raise SystemExit("Unable to launch Group Pay. Install its Debug build, boot the selected simulator, and try again.")
     print("Group Pay launched. Open its sandbox settings to verify the saved local connection.")
-    print("Open Profile → Configure sandbox → Save & check to enable test card creation.")
+    print("Open Profile → Advanced settings → Card connection → Save & check connection.")
 
 
 if __name__ == "__main__":

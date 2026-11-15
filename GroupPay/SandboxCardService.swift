@@ -32,49 +32,49 @@ enum SandboxConnectionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            "Enter a server URL with a host and optional port, without a path, username, password, query, or fragment."
+            "Check the connection address and try again."
         case .insecureDeviceURL:
-            "Use HTTPS on a physical device. The simulator can also reach the Mac’s local backend at http://127.0.0.1:8787."
+            "This connection isn’t secure. Use the secure address supplied for this device."
         case .missingToken:
-            "Enter the local backend’s Group Pay client token. Do not enter Marqeta API credentials here."
+            "Enter your Group Pay connection token to continue."
         case .invalidToken:
-            "The client token must contain 32–256 letters, digits, hyphens, or underscores. Copy GROUP_PAY_CLIENT_TOKEN from the local backend settings."
+            "The connection token doesn’t look complete. Copy it again and try once more."
         case .tokenForNewServer:
-            "Re-enter the local client token when changing servers. Existing credentials are not automatically sent to a different server."
+            "Enter the connection token again for this address."
         case .keychain(let status):
             if status == errSecMissingEntitlement {
-                "This app build cannot access Keychain. Install a simulator build with automatic signing enabled, then run the connection helper again."
+                "Your connection couldn’t be saved securely. Update or reinstall Group Pay, then try again."
             } else {
-                "The connection credential could not be saved securely. Unlock this device and try again."
+                "Your connection couldn’t be saved securely. Unlock this device and try again."
             }
         case .missingLaunchSettings:
-            "The connection helper did not supply its local settings. Run the simulator connection helper again."
+            "Connection details are missing. Open Connection details to finish setup."
         case .notConfigured:
-            "Set up the sandbox connection in Profile before creating a Marqeta card."
+            "Connect the card service in Advanced settings before creating a test card."
         case .invalidBill:
-            "Review the bill and collect everyone’s approval before creating a sandbox card."
+            "Review the bill and collect everyone’s approval before creating a card."
         case .invalidResponse:
-            "The backend returned an unexpected card result. Retry this same bill to recover its status; do not create a replacement bill."
+            "We couldn’t confirm this card’s details. Retry this same bill to check its status instead of creating a new bill."
         case .unavailable:
-            "The sandbox backend could not be reached. Start it on your Mac and check the server URL."
+            "The card service couldn’t be reached. Check your connection and try again."
         case .timedOut:
-            "The card request timed out. Retry this same bill to recover its result; the backend may already have created the card."
+            "Creating your card is taking longer than expected. Retry this same bill to check its status."
         case .unauthorized:
-            "The backend rejected the client token. Check GROUP_PAY_CLIENT_TOKEN in the Mac’s local backend settings."
+            "The connection token wasn’t accepted. Check it in Connection details and try again."
         case .conflict:
-            "The backend already has a different or incomplete request for this bill cycle. Keep this bill and review the backend status before trying again."
+            "This bill’s card request needs to be reviewed. Keep this bill and check the card service before trying again."
         case .unconfiguredBackend:
-            "The backend is not ready. Add your Marqeta sandbox credentials to its local settings file and restart it."
+            "The card service isn’t ready yet. Finish connection setup and try again."
         case .reconciliationPending:
-            "The sandbox card or its funding is still pending. Retry this same bill to recover the original request; do not create a new test or replacement bill."
+            "Your test card is still being prepared. Retry this same bill to check its status."
         case .sandboxUnavailable:
-            "Marqeta’s sandbox is temporarily unavailable. Retry this same bill to recover its original request; a card or funding order may already exist."
+            "The test card service is temporarily unavailable. Retry this same bill in a moment."
         case .sandboxAccessDenied:
-            "Marqeta rejected the backend’s sandbox credentials or permissions. Check the Marqeta settings on your Mac, then retry this same bill."
+            "The test card service couldn’t authorize this request. Check your service connection, then retry this same bill."
         case .redirect:
-            "The server redirected this request. Enter its direct HTTPS address; credentials were not forwarded."
-        case .rejected(let status):
-            "The sandbox backend could not complete this request (HTTP \(status)). Retry the same bill after checking its local configuration."
+            "This connection address has changed. Check Connection details and try again."
+        case .rejected:
+            "We couldn’t create the card. Retry this same bill in a moment."
         }
     }
 }
@@ -126,7 +126,7 @@ final class SandboxCardService {
             } catch let error as SandboxConnectionError {
                 setupError = error.localizedDescription
             } catch {
-                setupError = "The local connection could not be saved. Run the simulator connection helper again."
+                setupError = "Your connection couldn’t be saved. Open Connection details and try again."
             }
         }
         #endif
@@ -320,6 +320,7 @@ struct SandboxConnectionView: View {
     @State private var service = SandboxCardService.shared
     @State private var endpoint = SandboxCardService.shared.baseURL
     @State private var clientToken = ""
+    @State private var showConnectionDetails = !SandboxCardService.shared.configured
     @State private var busy = false
     @State private var status: String?
     @State private var error: String?
@@ -331,55 +332,66 @@ struct SandboxConnectionView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    PageHeading(overline: "Marqeta sandbox", title: "Connect your card lab.")
+                VStack(alignment: .leading, spacing: 18) {
                     Panel {
-                        Text("Your Mac handles the API keys.").font(.headline)
-                        Text("Only the local backend’s client token belongs here. Marqeta application and admin tokens stay in the backend’s settings, never in this app or iCloud.")
-                            .font(.subheadline).foregroundStyle(GP.secondary)
-                        TextField("Backend URL", text: $endpoint).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL).gpField()
-                        SecureField(service.configured ? "Client token · blank keeps saved token" : "Local backend client token", text: $clientToken)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().gpField()
-                        Button(busy ? "Checking…" : "Save & check connection") { checkConnection() }
-                            .buttonStyle(PrimaryButton()).disabled(busy)
-                        if let status { Label(status, systemImage: "checkmark.circle").font(.subheadline).foregroundStyle(GP.mint) }
-                        if let error = error ?? service.setupError {
-                            Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(GP.amber)
+                        HStack(spacing: 12) {
+                            Image(systemName: "creditcard").font(.title2).foregroundStyle(GP.mint)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Test mode").font(.headline)
+                                Text("Marqeta test cards").font(.subheadline).foregroundStyle(GP.secondary)
+                            }
                         }
-                    }
-                    Panel {
-                        Toggle("Create cards with Marqeta sandbox", isOn: Binding(
+                        Toggle("Use test cards", isOn: Binding(
                             get: { service.enabled },
                             set: { requested in
                                 if requested { checkConnection() }
                                 else { service.enabled = false; status = nil }
                             }
                         )).disabled(!service.configured || busy)
-                        Text("When enabled, the leader’s confirmation requests a real sandbox card through this backend. A failed request stays pending; the app does not replace it with a pretend card.")
+                        Text("Creates cards with test funds after everyone approves. No real money moves, and these cards can’t pay a business.")
                             .font(.caption).foregroundStyle(GP.secondary)
-                        Text("Sandbox cards and funds cannot pay a real merchant. The local backend trusts this test app’s approval data and is not a production payment service.")
-                            .font(.caption).foregroundStyle(GP.secondary)
-                        #if targetEnvironment(simulator)
-                        Text("The default address reaches a backend running on this Mac.").font(.caption).foregroundStyle(GP.secondary)
-                        #else
-                        Text("Physical devices need a reachable HTTPS backend. The Mac’s 127.0.0.1 address is available only from its simulator.").font(.caption).foregroundStyle(GP.secondary)
-                        #endif
+                    }
+                    Panel {
+                        HStack {
+                            Text("Connection").font(.headline)
+                            Spacer()
+                            Text(service.configured ? "Saved" : "Not set up")
+                                .font(.caption).foregroundStyle(service.configured ? GP.mint : GP.secondary)
+                        }
+                        DisclosureGroup("Connection details", isExpanded: $showConnectionDetails) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                TextField("Connection address", text: $endpoint)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL).gpField()
+                                SecureField(service.configured ? "Token saved · leave blank to keep it" : "Group Pay connection token", text: $clientToken)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled().gpField()
+                                Text("Use only the local Group Pay token. Your Marqeta application and admin credentials stay on your Mac; never enter them here.")
+                                    .font(.caption).foregroundStyle(GP.secondary)
+                                if service.configured {
+                                    Button("Remove saved connection", role: .destructive) {
+                                        do {
+                                            try service.clearConnection()
+                                            endpoint = service.baseURL
+                                            clientToken = ""
+                                            status = nil; error = nil
+                                        } catch { self.error = error.localizedDescription }
+                                    }.font(.subheadline).disabled(busy)
+                                }
+                            }.padding(.top, 12)
+                        }.font(.subheadline)
+                        Button(busy ? "Checking…" : "Save & check connection") { checkConnection() }
+                            .buttonStyle(PrimaryButton()).disabled(busy)
+                        if let status {
+                            Label(status, systemImage: "checkmark.circle").font(.subheadline).foregroundStyle(GP.mint)
+                        }
+                        if let error = error ?? service.setupError {
+                            Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(GP.amber)
+                        }
                     }
                     #if targetEnvironment(simulator)
                     testPanel
                     #endif
-                    if service.configured {
-                        Button("Remove saved connection", role: .destructive) {
-                            do {
-                                try service.clearConnection()
-                                endpoint = service.baseURL
-                                clientToken = ""
-                                status = nil; error = nil
-                            } catch { self.error = error.localizedDescription }
-                        }.font(.subheadline).disabled(busy)
-                    }
                 }.padding(22)
-            }.gpPage().navigationTitle("Sandbox connection").navigationBarTitleDisplayMode(.inline)
+            }.gpPage().navigationTitle("Test cards").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
         }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(busy)
     }
@@ -395,7 +407,7 @@ struct SandboxConnectionView: View {
                 clientToken = ""
                 guard try await service.health() else { throw SandboxConnectionError.unconfiguredBackend }
                 service.enabled = true
-                status = "Sandbox backend connected."
+                status = "Ready to create test cards."
             } catch { self.error = error.localizedDescription }
         }
     }
@@ -403,20 +415,20 @@ struct SandboxConnectionView: View {
     #if targetEnvironment(simulator)
     private var testPanel: some View {
         Panel {
-            Label("Try one sandbox card", systemImage: "creditcard").font(.headline)
-            Text("Uses test participants and a $10.00 test bill. No real money moves. This tests the configured Marqeta connection without requiring iCloud in the simulator.")
+            Label("Try a $10 card", systemImage: "creditcard").font(.headline)
+            Text("Uses a sample bill and test participants. No real money moves.")
                 .font(.caption).foregroundStyle(GP.secondary)
             if let card = testCard {
                 Text("•••• \(card.lastFour)").font(.title2.monospaced().bold())
-                Text("\(card.state) · \(Money.string(cents: card.loadedCents)) sandbox funds").font(.subheadline).foregroundStyle(GP.mint)
+                Text("\(card.state.capitalized) · \(Money.string(cents: card.loadedCents)) in test funds").font(.subheadline).foregroundStyle(GP.mint)
                 Button("New test") {
                     testBillID = SandboxCardService.newTestBillID()
                     testCard = nil; error = nil
                 }.disabled(busy)
             } else {
-                Button(busy ? "Working…" : "Issue a $10 test card") { issueTestCard() }
+                Button(busy ? "Working…" : "Create $10 test card") { issueTestCard() }
                     .buttonStyle(PrimaryButton()).disabled(!service.configured || !service.enabled || busy)
-                Text("Retries recover the same test request, including after reopening this screen.").font(.caption).foregroundStyle(GP.secondary)
+                Text("Trying again keeps the same test, even after reopening this screen.").font(.caption).foregroundStyle(GP.secondary)
             }
         }
     }

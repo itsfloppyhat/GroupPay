@@ -22,7 +22,7 @@ For the simulator, install a Debug app with normal Xcode signing enabled so its 
 python3 sandbox_backend/configure_simulator.py --device <simulator-UDID>
 ```
 
-Omit `--device` if exactly one simulator is booted. The helper launches the app with only its local bearer token, which the Debug simulator build saves in Keychain. Marqeta credentials are never passed to the app. Open **Profile → Configure sandbox → Save & check connection**, then **Issue a $10 test card**. This explicitly fictional test is independent of the iCloud group workflow.
+Omit `--device` if exactly one simulator is booted. The helper launches the app with only its local bearer token, which the Debug simulator build saves in Keychain. Marqeta credentials are never passed to the app. Open **Profile → Advanced settings → Card connection → Save & check connection**, then **Create $10 test card**. This explicitly fictional test is independent of the iCloud group workflow.
 
 For manual pairing, use `http://127.0.0.1:8787` and the **local app connection token**, not either Marqeta credential. To show that local token in your terminal:
 
