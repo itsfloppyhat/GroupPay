@@ -10,6 +10,7 @@ extension Notification.Name {
     static let groupPayAccountChanged = Notification.Name("GroupPay.accountChanged")
     static let groupPayShareAccepted = Notification.Name("GroupPay.shareAccepted")
     static let groupPayOpenBill = Notification.Name("GroupPay.openBill")
+    static let groupPayOpenInbox = Notification.Name("GroupPay.openInbox")
 }
 
 /// Each bill belongs to its creator's private database and is shared only with invited iCloud users.
@@ -31,6 +32,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     private var currentUserID: String?
     private var accountEpoch = 0
     private var recurringReminderTask: Task<Void, Never>?
+    private var billNotificationTask: Task<Bool, Never>?
+    private var billNotificationTaskID: UUID?
+    private var openedCloudNotification = false
     private static let recurringReminderPrefix = "group-pay-recurring-"
     private var zoneReady = false
     private let encoder: JSONEncoder = {
@@ -105,6 +109,7 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     func invalidateAccount() {
         accountEpoch += 1
         currentUserID = nil
+        openedCloudNotification = false
         locations.removeAll()
         groupLocations.removeAll()
         friendInvitationLocations.removeAll()
@@ -124,6 +129,12 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         guard accountEpoch == epoch, expectedID == nil || currentUserID == expectedID else {
             throw Failure.accountChanged
         }
+    }
+
+    func markCloudNotificationOpened() {
+        // This flag also covers a cold-launch workspace fetch that starts before
+        // UNUserNotificationCenter finishes handling the tapped OS notification.
+        openedCloudNotification = true
     }
 
     func fetchBills() async throws -> [Bill] {
@@ -172,6 +183,11 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
                 nextGroups[group.id] = Location(recordID: record.recordID, scope: scope)
             }
             groupLocations = nextGroups
+            let notificationMode = BillNotificationDeliveryMode.resolve(isForeground: UIApplication.shared.applicationState == .active,
+                                                                         hasVisibleAlert: false, openedNotification: openedCloudNotification)
+            _ = await reconcileBillNotifications(loaded, identity: identity, epoch: epoch, mode: notificationMode)
+            try validateSession(epoch, expectedID: identity)
+            if notificationMode == .backgroundVisible { openedCloudNotification = false }
             remember(loaded)
             return CloudWorkspace(bills: result, friends: friends, groups: groups.sorted { $0.createdAt > $1.createdAt },
                                   friendInvitations: connections.pending.sorted { $0.createdAt > $1.createdAt })
@@ -629,26 +645,39 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             let database = container.database(with: scope)
             let subscriptions = try await database.allSubscriptions()
             try validateSession(epoch, expectedID: identity)
-            let identifier = "group-pay-\(suffix)-v2"
-            if !subscriptions.contains(where: { $0.subscriptionID == identifier }) {
-                let subscription = CKDatabaseSubscription(subscriptionID: identifier)
-                // No record-type filter: reusable group creation and both bill
-                // versions must wake the app, including newly accepted zones.
+            for channel in CloudNotificationChannel.all {
+                let identifier = channel.subscriptionID(scope: suffix)
+                let existing = subscriptions.first { $0.subscriptionID == identifier } as? CKDatabaseSubscription
+                let info = existing?.notificationInfo
+                let expectedBody = channel.isVisible ? CloudNotificationChannel.alertBody : nil
+                let expectedTitle = channel.isVisible ? CloudNotificationChannel.alertTitle : nil
+                let expectedSound = channel.isVisible ? "default" : nil
+                if existing?.recordType == channel.recordType, info?.shouldSendContentAvailable == true,
+                   info?.alertBody == expectedBody, info?.title == expectedTitle, info?.soundName == expectedSound { continue }
+                let subscription = existing ?? CKDatabaseSubscription(subscriptionID: identifier)
+                subscription.recordType = channel.recordType
                 let notification = CKSubscription.NotificationInfo()
                 notification.shouldSendContentAvailable = true
+                notification.alertBody = expectedBody
+                notification.title = expectedTitle
+                notification.soundName = expectedSound
                 subscription.notificationInfo = notification
                 _ = try await database.save(subscription)
                 try validateSession(epoch, expectedID: identity)
             }
-            let legacyID = "group-pay-\(suffix)-v1"
-            if subscriptions.contains(where: { $0.subscriptionID == legacyID }) {
-                _ = try await database.deleteSubscription(withID: legacyID)
-                try validateSession(epoch, expectedID: identity)
+            // Remove the unfiltered silent subscriptions only after all scoped
+            // replacements exist, so each bill change has one CloudKit channel.
+            for version in ["v1", "v2"] {
+                let legacyID = "group-pay-\(suffix)-\(version)"
+                if subscriptions.contains(where: { $0.subscriptionID == legacyID }) {
+                    _ = try await database.deleteSubscription(withID: legacyID)
+                    try validateSession(epoch, expectedID: identity)
+                }
             }
         }
     }
 
-    func receivedRemoteChange() async throws -> Bool {
+    func receivedRemoteChange(mode: BillNotificationDeliveryMode = .foreground, requireNotificationEnqueue: Bool = false) async throws -> Bool {
         let identity = try await account().id
         let epoch = accountEpoch
         let previous = UserDefaults.standard.dictionary(forKey: fingerprintsKey) as? [String: String] ?? [:]
@@ -658,26 +687,92 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             Self.synchronizedTypes.contains(record.recordType) && record["updatedBy"] as? String != identity &&
                 previous[recordKey(record)] != fingerprint(record)
         }
-        remember(records)
-        NotificationCenter.default.post(name: .groupPayCloudChanged, object: nil)
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let enqueueFailed = await reconcileBillNotifications(records, identity: identity, epoch: epoch, mode: mode)
         try validateSession(epoch, expectedID: identity)
-        if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
-            for (record, _) in changes where Self.billTypes.contains(record.recordType) {
-                let bill = try decode(record)
-                guard let notice = BillUpdateNotice.make(bill: bill, accountID: identity) else { continue }
-                let content = UNMutableNotificationContent()
-                content.title = notice.title
-                content.body = notice.body
-                content.sound = .default
-                content.userInfo = ["billID": bill.id.uuidString]
-                // One replaceable notice per bill keeps coalesced updates useful.
-                let request = UNNotificationRequest(identifier: "group-pay-bill-" + bill.id.uuidString, content: content, trigger: nil)
-                try await UNUserNotificationCenter.current().add(request)
-                try validateSession(epoch, expectedID: identity)
-            }
+        if mode == .backgroundVisible { openedCloudNotification = false }
+        remember(records)
+        // UI state refreshes on foreground entry. Posting here in the background
+        // could trigger another full workspace fetch and duplicate a visible push.
+        if mode == .foreground { NotificationCenter.default.post(name: .groupPayCloudChanged, object: nil) }
+        if requireNotificationEnqueue, enqueueFailed {
+            throw Failure.unavailable("The detailed bill alert could not be displayed. Open your inbox to review the update.")
         }
         return !changes.isEmpty
+    }
+
+    /// Foreground refreshes and background pushes share one delivery queue.
+    /// Reading a record must never silently consume its user-visible update.
+    private func reconcileBillNotifications(_ records: [(CKRecord, CKDatabase.Scope)], identity: String, epoch: Int,
+                                            mode: BillNotificationDeliveryMode) async -> Bool {
+        let previous = billNotificationTask
+        let taskID = UUID()
+        billNotificationTaskID = taskID
+        let task = Task { @MainActor in
+            _ = await previous?.value
+            defer {
+                if self.billNotificationTaskID == taskID {
+                    self.billNotificationTask = nil
+                    self.billNotificationTaskID = nil
+                }
+            }
+            guard self.accountEpoch == epoch, self.currentUserID == identity else { return false }
+            let changes = records.filter { Self.billTypes.contains($0.0.recordType) }.compactMap { record, _ -> (BillNotificationChange, UUID)? in
+                guard let bill = try? self.decode(record) else { return nil }
+                // A group share must not notify someone outside its named membership.
+                let belongs = bill.groupID == nil || bill.members.contains { $0.accountID == identity }
+                let notice = belongs ? BillUpdateNotice.make(bill: bill, accountID: identity) : nil
+                return (BillNotificationChange(key: self.recordKey(record), fingerprint: self.fingerprint(record),
+                                               modifiedAt: record.modificationDate, authorID: record["updatedBy"] as? String,
+                                               notice: notice), bill.id)
+            }
+            if self.notificationLedger(for: identity) == nil {
+                let legacy = UserDefaults.standard.dictionary(forKey: self.fingerprintsKey) as? [String: String]
+                var ledger = BillNotificationLedger(accountID: identity, legacyFingerprints: legacy ?? [:])
+                // A first sign-in establishes a quiet baseline. An upgrade uses
+                // the last loaded snapshot, so newly arrived records still alert.
+                if legacy == nil { for (change, _) in changes { ledger.acknowledge(change, for: identity) } }
+                self.saveNotificationLedger(ledger)
+            }
+            // Silent group/friend updates may arrive before the bill's visible
+            // push. Preserve pending bill notices for that push or foreground sync.
+            guard mode.shouldAcknowledgeChanges else { return false }
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            guard self.accountEpoch == epoch, self.currentUserID == identity else { return false }
+            let permitted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            var enqueueFailed = false
+            for (change, billID) in changes {
+                guard self.accountEpoch == epoch, self.currentUserID == identity else { return enqueueFailed }
+                guard var ledger = self.notificationLedger(for: identity) else { return enqueueFailed }
+                if permitted, mode.shouldEnqueueLocal, ledger.shouldDeliver(change, to: identity), let notice = change.notice {
+                    let content = UNMutableNotificationContent()
+                    content.title = notice.title
+                    content.body = notice.body
+                    content.sound = .default
+                    content.userInfo = ["billID": billID.uuidString]
+                    let request = UNNotificationRequest(identifier: "group-pay-bill-" + billID.uuidString, content: content, trigger: nil)
+                    do { try await center.add(request) }
+                    catch {
+                        enqueueFailed = true
+                        continue // Keep this revision unacknowledged so the next sync retries.
+                    }
+                    guard self.accountEpoch == epoch, self.currentUserID == identity else {
+                        center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
+                        center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+                        return enqueueFailed
+                    }
+                    // An own write may have happened during enqueue. Reload so
+                    // acknowledging this snapshot never rolls back that revision.
+                    guard let latest = self.notificationLedger(for: identity) else { return enqueueFailed }
+                    ledger = latest
+                }
+                ledger.acknowledge(change, for: identity)
+                self.saveNotificationLedger(ledger)
+            }
+            return enqueueFailed
+        }
+        billNotificationTask = task
+        return await task.value
     }
 
     /// Calendar reminders prompt the leader to start a cycle; they never create
@@ -916,6 +1011,18 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
 
     private var fingerprintsKey: String { "GroupPay.cloudFingerprints.v2.\(currentUserID ?? "signed-out")" }
 
+    private func notificationLedger(for identity: String) -> BillNotificationLedger? {
+        guard let data = UserDefaults.standard.data(forKey: "GroupPay.notificationLedger.v1.\(identity)"),
+              let ledger = try? JSONDecoder().decode(BillNotificationLedger.self, from: data),
+              ledger.accountID == identity else { return nil }
+        return ledger
+    }
+
+    private func saveNotificationLedger(_ ledger: BillNotificationLedger) {
+        guard let data = try? encoder.encode(ledger) else { return }
+        UserDefaults.standard.set(data, forKey: "GroupPay.notificationLedger.v1.\(ledger.accountID)")
+    }
+
     private func recordKey(_ record: CKRecord) -> String {
         record.recordID.zoneID.ownerName + "/" + record.recordID.zoneID.zoneName + "/" + record.recordID.recordName
     }
@@ -929,6 +1036,14 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         var values = replacing ? [:] : UserDefaults.standard.dictionary(forKey: fingerprintsKey) as? [String: String] ?? [:]
         for (record, _) in records where Self.synchronizedTypes.contains(record.recordType) { values[recordKey(record)] = fingerprint(record) }
         UserDefaults.standard.set(values, forKey: fingerprintsKey)
+        if let identity = currentUserID, var ledger = notificationLedger(for: identity) {
+            // Local mutations cannot later produce a banner from a stale fetch.
+            for (record, _) in records where Self.billTypes.contains(record.recordType) && record["updatedBy"] as? String == identity {
+                ledger.acknowledge(BillNotificationChange(key: recordKey(record), fingerprint: fingerprint(record),
+                                                         modifiedAt: record.modificationDate, authorID: identity, notice: nil), for: identity)
+            }
+            saveNotificationLedger(ledger)
+        }
     }
 
     private func readable(_ error: Error) -> Error {
@@ -989,6 +1104,10 @@ final class GroupPayAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     }
 
     func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        if let response = options.notificationResponse,
+           CKNotification(fromRemoteNotificationDictionary: response.notification.request.content.userInfo) != nil {
+            CloudService.shared.markCloudNotificationOpened()
+        }
         let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         configuration.delegateClass = GroupPaySceneDelegate.self
         return configuration
@@ -999,9 +1118,13 @@ final class GroupPayAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
             completionHandler(.noData)
             return
         }
+        let hasVisibleAlert = (userInfo["aps"] as? [String: Any])?["alert"] != nil
+        // The OS already presents a visible push while this app is backgrounded.
+        // Fetch its data and acknowledge it without creating a second local copy.
+        let mode = BillNotificationDeliveryMode.resolve(isForeground: application.applicationState == .active, hasVisibleAlert: hasVisibleAlert)
         Task { @MainActor in
             do {
-                let changed = try await CloudService.shared.receivedRemoteChange()
+                let changed = try await CloudService.shared.receivedRemoteChange(mode: mode)
                 completionHandler(changed ? .newData : .noData)
             } catch {
                 completionHandler(.failed)
@@ -1016,16 +1139,36 @@ final class GroupPayAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let rawID = response.notification.request.content.userInfo["billID"] as? String
         let billID = rawID.flatMap(UUID.init(uuidString:))
+        let isCloudUpdate = CKNotification(fromRemoteNotificationDictionary: response.notification.request.content.userInfo) != nil
+        if isCloudUpdate {
+            await CloudService.shared.markCloudNotificationOpened()
+            // Tapping the generic OS alert counts as seeing that update, even if
+            // iOS never gave its content-available callback background time.
+            _ = try? await CloudService.shared.receivedRemoteChange(mode: .backgroundVisible)
+        }
         await MainActor.run {
             NotificationCenter.default.post(name: .groupPayCloudChanged, object: nil)
             if let billID {
                 NotificationCenter.default.post(name: .groupPayOpenBill, object: nil, userInfo: ["billID": billID])
+            } else if isCloudUpdate {
+                NotificationCenter.default.post(name: .groupPayOpenInbox, object: nil)
             }
         }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        if CKNotification(fromRemoteNotificationDictionary: notification.request.content.userInfo) != nil {
+            // While open, replace the generic server banner with the recipient's
+            // actual amount/status. The shared ledger deduplicates both delegates.
+            do {
+                _ = try await CloudService.shared.receivedRemoteChange(requireNotificationEnqueue: true)
+                return []
+            } catch {
+                // A temporary fetch failure must not hide the OS fallback alert.
+                return [.banner, .sound]
+            }
+        }
+        return [.banner, .sound]
     }
 }
 

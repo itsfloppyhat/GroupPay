@@ -44,6 +44,7 @@ struct ReceiptChecks {
         check(order.items.reduce(0) { $0 + $1.amountCents } + order.taxCents == 74_549,
               "Editable draft agrees with the printed total")
         check(order.tipCents == 0, "Retail order does not invent a printed tip")
+        check(order.suggestedCategory == .other, "Retail order must not default to restaurant tipping")
         check(order.rawText.contains("$699.99") && order.rawText.contains("saving"),
               "Preserve original OCR text for review")
 
@@ -83,6 +84,24 @@ struct ReceiptChecks {
         check(gratuity.items.map(\.amountCents) == [4_000], "Suggested tips are not line items")
         check(gratuity.tipCents == 800 && gratuity.taxCents == 400 && gratuity.totalCents == 5_200,
               "Only already-included gratuity contributes to scanned tip")
+        check(gratuity.suggestedCategory == .dining, "Suggested tipping identifies dining context")
+
+        for header in ["Neighborhood Restaurant", "Cafe Willow", "Maple Bistro", "Table: 12", "Guests 3", "Server: Robin"] {
+            let classified = try ReceiptRecognizer.parse(lines: [header, "Meal $40.00", "Tax $4.00", "Total $44.00"])
+            check(classified.suggestedCategory == .dining, "Recognize explicit dining context: \(header)")
+        }
+        for header in ["Order summary", "Sold by Example Store", "Store Pickup FREE"] {
+            let classified = try ReceiptRecognizer.parse(lines: [header, "Restaurant table", "$40.00", "Subtotal $40.00", "Total $40.00"])
+            check(classified.suggestedCategory == .other, "Retail context overrides dining words in a product description: \(header)")
+        }
+        let furniture = try ReceiptRecognizer.parse(lines: ["Furniture shop", "Table lamp $40.00", "Server rack $80.00", "Total $120.00"])
+        check(furniture.suggestedCategory == .other, "Table and server product names do not trigger dining tips")
+        let unknown = try ReceiptRecognizer.parse(lines: ["Example shop", "Purchase $40.00", "Total $40.00"])
+        check(unknown.suggestedCategory == .other, "Unknown scans conservatively start without restaurant tipping")
+        let cafeProduct = try ReceiptRecognizer.parse(lines: ["Homewares shop", "Cafe mug gift set", "$40.00", "Subtotal $40.00", "Total $40.00"])
+        check(cafeProduct.suggestedCategory == .other, "A cafe word in a later unpriced product description is not a dining header")
+        let groceryContext = try ReceiptRecognizer.parse(lines: ["Neighborhood Supermarket", "Apples $4.00", "Total $4.00"])
+        check(groceryContext.suggestedCategory == .groceries, "An explicit supermarket header suggests groceries")
 
         let thousands = try ReceiptRecognizer.parse(lines: ["Furniture $1,299.99", "Tax $84.50", "Total $1,384.49"])
         check(thousands.items.first?.amountCents == 129_999 && thousands.totalCents == 138_449,
@@ -113,6 +132,7 @@ struct ReceiptChecks {
                   "Native OCR keeps the supplied image’s tax and total separate")
             check(scanned.items.reduce(0) { $0 + $1.amountCents } + scanned.taxCents == scanned.totalCents,
                   "Native OCR produces a reconciled editable draft")
+            check(scanned.suggestedCategory == .other, "Native OCR classifies the supplied retail order without restaurant tips")
         }
 
         print("Passed \(checks) receipt checks.")

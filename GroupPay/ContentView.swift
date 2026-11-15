@@ -55,6 +55,10 @@ struct ContentView: View {
             guard let id else { return }
             Task { await store.refresh(); tab = 0; route = [id] }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .groupPayOpenInbox)) { _ in
+            tab = 1
+            Task { await store.refresh() }
+        }
         .task(id: phase) {
             // Reconcile visible approvals even when iOS coalesces a background push.
             guard phase == .active else { return }
@@ -76,6 +80,7 @@ struct ContentView: View {
                 }.padding(.top, 18)
                 hero
                 if !store.connected { connectionBanner }
+                syncIssue
                 HStack(spacing: 0) {
                     metric("Active splits", value: "\(store.activeBills.count)", symbol: "person.2")
                     Rectangle().fill(GP.border).frame(width: 1, height: 48).padding(.horizontal, 20)
@@ -166,8 +171,11 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 Text("A little nudge. Then you’re all set.").font(.subheadline).foregroundStyle(GP.secondary)
+                syncIssue
                 if store.pendingBills.isEmpty {
-                    EmptyPanel(symbol: "checkmark.bubble", title: "All caught up.", subtitle: "When someone shares a bill, you’ll find your portion here. Review it, approve it, and get back to the good stuff.")
+                    if store.connectionIssue == nil {
+                        EmptyPanel(symbol: "checkmark.bubble", title: "All caught up.", subtitle: "When someone shares a bill, you’ll find your portion here. Review it, approve it, and get back to the good stuff.")
+                    }
                 } else {
                     sectionHeading("Ready for your review", detail: "\(store.pendingBills.count)")
                     ForEach(store.pendingBills) { bill in
@@ -195,6 +203,23 @@ struct ContentView: View {
                 }
             }.padding(24)
         }.navigationTitle("Inbox").navigationBarTitleDisplayMode(.large).gpPage().refreshable { await store.refresh() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                        .accessibilityLabel("Refresh inbox").disabled(!store.connected || store.busy || store.refreshing)
+                }
+            }
+    }
+
+    @ViewBuilder private var syncIssue: some View {
+        if store.connected, let issue = store.connectionIssue {
+            Panel {
+                Label("Updates paused", systemImage: "icloud.slash").font(.headline).foregroundStyle(GP.amber)
+                Text(issue).font(.subheadline).foregroundStyle(GP.secondary)
+                Button("Try refreshing") { Task { await store.refresh() } }
+                    .font(.subheadline.weight(.semibold)).disabled(store.busy || store.refreshing)
+            }
+        }
     }
 
     private var cards: some View {
@@ -272,6 +297,13 @@ struct ContentView: View {
                             } else {
                                 Text("Connect iCloud to enable").font(.caption).foregroundStyle(GP.secondary)
                             }
+                        } else {
+                            Button(store.sendingNotificationTest ? "Sending…" : "Send test notification") {
+                                Task { await store.sendTestNotification() }
+                            }.font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
+                                .disabled(store.sendingNotificationTest).accessibilityIdentifier("sendTestNotification")
+                            Text("Check where alerts appear on your phone or mirrored Mac.")
+                                .font(.caption).foregroundStyle(GP.secondary)
                         }
                     }
                     Panel {

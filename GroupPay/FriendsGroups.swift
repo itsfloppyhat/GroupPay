@@ -133,3 +133,82 @@ struct BillUpdateNotice: Equatable, Sendable {
         }
     }
 }
+
+/// A record snapshot considered for a user-visible bill notification. The
+/// snapshot timestamp prevents an older overlapping fetch from undoing a newer
+/// delivery or a local edit that has already been acknowledged.
+struct BillNotificationChange: Sendable {
+    var key: String
+    var fingerprint: String
+    var modifiedAt: Date?
+    var authorID: String?
+    var notice: BillUpdateNotice?
+}
+
+enum BillNotificationDeliveryMode: Sendable {
+    case foreground
+    case backgroundVisible
+    case backgroundSilent
+
+    static func resolve(isForeground: Bool, hasVisibleAlert: Bool, openedNotification: Bool = false) -> Self {
+        if openedNotification { return .backgroundVisible }
+        if isForeground { return .foreground }
+        return hasVisibleAlert ? .backgroundVisible : .backgroundSilent
+    }
+
+    var shouldEnqueueLocal: Bool { self == .foreground }
+    var shouldAcknowledgeChanges: Bool { self != .backgroundSilent }
+}
+
+/// Bill changes have an OS-presented fallback even when the app cannot run.
+/// Address-book/group changes only wake synchronization, avoiding noisy alerts.
+struct CloudNotificationChannel: Sendable {
+    let recordType: String
+    let isVisible: Bool
+
+    static let all: [CloudNotificationChannel] = [
+        .init(recordType: "GroupPayBill", isVisible: true),
+        .init(recordType: "GroupPayBillV2", isVisible: true),
+        .init(recordType: "GroupPayGroup", isVisible: false),
+        .init(recordType: "GroupPayFriend", isVisible: false),
+        .init(recordType: "GroupPayFriendInvitation", isVisible: false)
+    ]
+
+    func subscriptionID(scope: String) -> String { "group-pay-\(scope)-\(recordType.lowercased())-v3" }
+    static let alertTitle = "Group Pay"
+    static let alertBody = "A shared bill has an update. Open Group Pay to review your portion and group status."
+}
+
+/// Notification acknowledgement is separate from merely loading a record.
+/// A candidate remains eligible until enqueue succeeds; declined permission and
+/// non-actionable/own changes can be acknowledged without sending a banner.
+struct BillNotificationLedger: Codable, Sendable {
+    struct Entry: Codable, Sendable {
+        var fingerprint: String
+        var modifiedAt: Date?
+    }
+
+    let accountID: String
+    private(set) var entries: [String: Entry]
+
+    init(accountID: String, legacyFingerprints: [String: String] = [:]) {
+        self.accountID = accountID
+        self.entries = legacyFingerprints.mapValues { Entry(fingerprint: $0, modifiedAt: nil) }
+    }
+
+    func shouldDeliver(_ change: BillNotificationChange, to identity: String) -> Bool {
+        guard identity == accountID, change.authorID != identity, change.notice != nil,
+              entries[change.key]?.fingerprint != change.fingerprint else { return false }
+        return !isStale(change)
+    }
+
+    mutating func acknowledge(_ change: BillNotificationChange, for identity: String) {
+        guard identity == accountID, !isStale(change) else { return }
+        entries[change.key] = Entry(fingerprint: change.fingerprint, modifiedAt: change.modifiedAt)
+    }
+
+    private func isStale(_ change: BillNotificationChange) -> Bool {
+        guard let previous = entries[change.key]?.modifiedAt, let current = change.modifiedAt else { return false }
+        return current < previous
+    }
+}

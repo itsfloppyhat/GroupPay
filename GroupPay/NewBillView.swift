@@ -354,6 +354,12 @@ struct NewBillView: View {
     private func decimal(_ cents: Int) -> String { String(format: "%d.%02d", cents / 100, cents % 100) }
     private func apply(_ receipt: ScannedReceipt) {
         title = receipt.merchant
+        category = switch receipt.suggestedCategory {
+        case .dining: .dining
+        case .groceries: .groceries
+        case .other: .other
+        }
+        leaderTip = TipSelection(percent: category == .dining ? 20 : 0)
         lines = receipt.items.map { ReceiptLine(name: $0.name, amount: decimal($0.amountCents)) }
         if lines.isEmpty, let total = receipt.totalCents { lines = [ReceiptLine(name: "Receipt total", amount: decimal(max(0, total - receipt.taxCents - receipt.tipCents)))] }
         tax = decimal(receipt.taxCents); scannedTipCents = receipt.tipCents

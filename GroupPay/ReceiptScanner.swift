@@ -7,12 +7,17 @@ import VisionKit
 #endif
 
 struct ScannedReceipt: Sendable {
+    enum SuggestedCategory: Sendable {
+        case dining, groceries, other
+    }
+
     var merchant: String
     var items: [ScannedReceiptItem]
     var taxCents: Int
     var tipCents: Int
     var totalCents: Int?
     var rawText: String
+    var suggestedCategory: SuggestedCategory = .other
 }
 
 struct ScannedReceiptItem: Identifiable, Sendable {
@@ -133,8 +138,36 @@ enum ReceiptRecognizer {
         } ?? "Scanned receipt"
         return ScannedReceipt(
             merchant: String(merchant.prefix(80)), items: items, taxCents: tax,
-            tipCents: tip, totalCents: total, rawText: cleaned.joined(separator: "\n")
+            tipCents: tip, totalCents: total, rawText: cleaned.joined(separator: "\n"),
+            suggestedCategory: suggestedCategory(for: cleaned)
         )
+    }
+
+    /// A category can change the default tip, so ambiguous scans remain Other.
+    /// Look for receipt context rather than food/product names or merchant lists.
+    private static func suggestedCategory(for lines: [String]) -> ScannedReceipt.SuggestedCategory {
+        let normalized = lines.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        if normalized.contains(where: { matches($0, #"^(order\s+summary|sold\s+by|store\s+pickup)\b"#) }) {
+            return .other
+        }
+        let header = normalized.first {
+            $0.rangeOfCharacter(from: .letters) != nil && trailingPrice(in: $0) == nil &&
+                !matches($0, #"^(receipt|invoice|guest\s+check|thank\s+you|welcome)\s*$"#)
+        } ?? ""
+        if matches(header, #"\b(grocery|groceries|supermarket)\b"#) {
+            return .groceries
+        }
+        let diningHeader = matches(header, #"\b(restaurant|caf[eé]|bistro|pizzeria|steakhouse)\b"#)
+        let diningService = normalized.contains {
+            // "Table lamp" and "Server rack" are products, not dining metadata.
+            matches($0, #"^table\s*(?:no\.?\s*)?[:#]?\s*[a-z]?\d+[a-z]?\s*$"#) ||
+            matches($0, #"^(guests?|covers?|party\s+size)\s*[:#]?\s*\d+\s*$"#) ||
+            matches($0, #"^(server|served\s+by|waiter|waitress)\s*[:#]\s*\S+"#)
+        }
+        let suggestedTip = normalized.contains {
+            matches($0, #"^(suggested|recommended)\s+(tips?|gratuity)\b"#)
+        }
+        return diningHeader || diningService || suggestedTip ? .dining : .other
     }
 
     private static func trailingPrice(in line: String) -> (String, Int)? {

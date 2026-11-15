@@ -18,6 +18,7 @@ final class AppStore {
     var isPreview = false
     var notificationsEnabled = false
     var notificationsDenied = false
+    var sendingNotificationTest = false
     var sharingController: UICloudSharingController?
     var lastSynced: Date?
     private let cloud = CloudService.shared
@@ -38,6 +39,7 @@ final class AppStore {
         if busy { reconnectPending = true } else { await connect() }
     }
     var connected: Bool { accountID != nil && !isPreview }
+    var refreshing: Bool { refreshID != nil }
     var pendingBills: [Bill] { bills.filter { bill in
         bill.status == .collecting && bill.members.contains { $0.accountID == accountID && !$0.approved && accountID != nil }
     } }
@@ -433,6 +435,28 @@ final class AppStore {
             if token == session { notificationsEnabled = enabled; notificationsDenied = !enabled; await cloud.syncRecurringReminders(bills) }
         }
         catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func sendTestNotification() async {
+        guard connected, !sendingNotificationTest else { return }
+        sendingNotificationTest = true
+        defer { sendingNotificationTest = false }
+        let token = session
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard token == session else { return }
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+            error = "Turn on notifications first, then send a test alert."
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Group Pay notification check"
+        content.body = "This is a test alert. Your phone’s notification settings control where it appears."
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: "group-pay-notification-check", content: content,
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 2, repeats: false))
+        do { try await center.add(request) }
+        catch { if token == session { self.error = "The test alert couldn’t be sent. Check your notification settings and try again." } }
     }
 }
 
