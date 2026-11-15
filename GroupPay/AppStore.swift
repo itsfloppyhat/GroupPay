@@ -7,6 +7,8 @@ import CryptoKit
 @MainActor @Observable
 final class AppStore {
     var bills: [Bill] = []
+    var friends: [SavedFriend] = []
+    var groups: [PaymentGroup] = []
     var accountID: String?
     var name = UserDefaults.standard.string(forKey: "profileName") ?? "You"
     var busy = false
@@ -14,12 +16,14 @@ final class AppStore {
     var connectionIssue: String?
     var isPreview = false
     var notificationsEnabled = false
+    var notificationsDenied = false
     var sharingController: UICloudSharingController?
     var lastSynced: Date?
     private let cloud = CloudService.shared
     private var session = UUID()
     private var dataRevision = 0
     private var reconnectPending = false
+    private var refreshID: UUID?
 
     private func finish(_ token: UUID) {
         guard token == session else { return }
@@ -38,15 +42,29 @@ final class AppStore {
     } }
     var activeBills: [Bill] { bills.filter { $0.status != .paid } }
     var paidTotal: Int { bills.flatMap(\.history).reduce(0) { $0 + $1.amountCents } }
+    var ownedGroups: [PaymentGroup] { groups.filter { $0.ownerID == accountID } }
+    var friendSuggestions: [SavedFriend] {
+        var people: [String: SavedFriend] = [:]
+        for member in bills.flatMap(\.members) {
+            if let id = member.accountID, id != accountID, !friends.contains(where: { $0.id == id }) {
+                people[id] = SavedFriend(id: id, name: member.name)
+            }
+        }
+        return people.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
 
     func accountChanged() async {
         session = UUID()
+        refreshID = nil
         reconnectPending = false
         accountID = nil
         bills = []
+        friends = []
+        groups = []
         sharingController = nil
         lastSynced = nil
         notificationsEnabled = false
+        notificationsDenied = false
         isPreview = false
         busy = false
         await connect()
@@ -58,17 +76,21 @@ final class AppStore {
         defer { finish(token) }
         do {
             let account = try await cloud.account()
-            let fetched = try await cloud.fetchBills()
+            let workspace = try await cloud.fetchWorkspace()
             let verifiedAccount = try await cloud.account()
             guard token == session, verifiedAccount.id == account.id else { return }
             accountID = account.id
-            bills = fetched.sorted { $0.createdAt > $1.createdAt }
+            bills = workspace.bills.sorted { $0.createdAt > $1.createdAt }
+            friends = workspace.friends
+            groups = workspace.groups
             isPreview = false
             connectionIssue = nil
             lastSynced = .now
             await cloud.syncRecurringReminders(bills)
             let permission = await UNUserNotificationCenter.current().notificationSettings()
-            if permission.authorizationStatus == .authorized {
+            guard token == session else { return }
+            notificationsDenied = permission.authorizationStatus == .denied
+            if permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional {
                 do {
                     let enabled = try await cloud.configureNotifications()
                     if token == session { notificationsEnabled = enabled; await cloud.syncRecurringReminders(bills) }
@@ -77,37 +99,54 @@ final class AppStore {
         } catch {
             guard token == session else { return }
             accountID = nil
-            if !isPreview { bills = [] }
+            if !isPreview { bills = []; friends = []; groups = [] }
             connectionIssue = error.localizedDescription
         }
     }
     func refresh() async {
-        guard connected, !busy else { return }
+        guard connected, !busy, refreshID == nil else { return }
         let token = session
+        let requestID = UUID()
+        refreshID = requestID
+        defer { if refreshID == requestID { refreshID = nil } }
         let revision = dataRevision
         do {
             let current = try await cloud.account()
             guard token == session else { return }
             guard current.id == accountID else { await accountChanged(); return }
-            let fetched = try await cloud.fetchBills()
+            let workspace = try await cloud.fetchWorkspace()
             let verified = try await cloud.account()
-            guard token == session, verified.id == current.id, revision == dataRevision else { return }
-            bills = fetched.sorted { $0.createdAt > $1.createdAt }
+            guard token == session, verified.id == current.id, revision == dataRevision, !busy else { return }
+            bills = workspace.bills.sorted { $0.createdAt > $1.createdAt }
+            friends = workspace.friends
+            groups = workspace.groups
+            connectionIssue = nil
             lastSynced = .now
             await cloud.syncRecurringReminders(bills)
+            let permission = await UNUserNotificationCenter.current().notificationSettings()
+            guard token == session else { return }
+            notificationsDenied = permission.authorizationStatus == .denied
+            let permitted = permission.authorizationStatus == .authorized || permission.authorizationStatus == .provisional
+            if permitted && !notificationsEnabled {
+                let enabled = try await cloud.configureNotifications()
+                guard token == session else { return }
+                notificationsEnabled = enabled
+            } else if !permitted { notificationsEnabled = false }
         } catch {
             guard token == session, revision == dataRevision else { return }
-            accountID = nil
-            bills = []
-            sharingController = nil
+            // Account-change notifications clear private state separately. A
+            // transient network or save conflict must not sign the user out.
             connectionIssue = error.localizedDescription
         }
     }
     func preview() {
         session = UUID()
+        refreshID = nil
         busy = false
         isPreview = true
         accountID = nil
+        friends = []
+        groups = []
         bills = [Bill.demo(leaderID: "preview", name: name)]
     }
     func publish(_ bill: Bill) async -> Bool {
@@ -175,7 +214,7 @@ final class AppStore {
                 if let original = bill.sandboxBackendID, original != backendID {
                     throw BillError("This bill started with a different card connection. Restore the original connection in settings to finish creating its card.")
                 }
-                if bill.status == .collecting, let limit = newCardLimitCents, bill.totalCents > limit {
+                if bill.status == .collecting, let limit = newCardLimitCents, bill.cardAmountCents > limit {
                     throw BillError("New team test cards can hold up to \(Money.string(cents: limit)). This bill exceeds that limit.")
                 }
                 try bill.reserveSandboxCard(accountID: accountID)
@@ -214,8 +253,97 @@ final class AppStore {
         }
     }
 
+    func approvePortion(_ id: UUID, selection: TipSelection) async {
+        guard let accountID, connected, !busy,
+              let expected = bills.first(where: { $0.id == id }),
+              let expectedMember = expected.members.first(where: { $0.accountID == accountID }) else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
+                guard bill.cycle == expected.cycle, bill.foodShares == expected.foodShares,
+                      bill.taxShares == expected.taxShares, bill.feeShares == expected.feeShares,
+                      let member = bill.members.first(where: { $0.accountID == accountID }),
+                      member.tipPercent == expectedMember.tipPercent,
+                      member.tipOverrideCents == expectedMember.tipOverrideCents else {
+                    throw BillError("Your portion changed. Refresh and review it before approving.")
+                }
+                if bill.usesPersonalPricing {
+                    if selection.customAmount != nil {
+                        guard let amount = selection.amountCents(foodCents: bill.foodShares[member.id] ?? 0) else {
+                            throw BillError("Enter a valid tip amount.")
+                        }
+                        try bill.setPersonalTip(accountID: accountID, amountCents: amount)
+                    } else {
+                        try bill.setPersonalTip(accountID: accountID, percent: selection.percent)
+                    }
+                }
+                try bill.approve(accountID: accountID)
+            }
+            guard token == session else { return }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == id }) { bills[index] = updated }
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func saveFriend(_ friend: SavedFriend) async {
+        guard connected, !busy else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            _ = try await cloud.saveFriend(accountID: friend.id, name: friend.name)
+            let saved = try await cloud.fetchFriends()
+            guard token == session else { return }
+            friends = saved
+            dataRevision += 1
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func removeFriend(_ friend: SavedFriend) async {
+        guard connected, !busy else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            try await cloud.removeFriend(accountID: friend.id)
+            guard token == session else { return }
+            friends.removeAll { $0.id == friend.id }
+            dataRevision += 1
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func createGroup(name: String, friends selected: [SavedFriend]) async -> PaymentGroup? {
+        guard connected, !busy else { return nil }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            guard let accountID else { return nil }
+            let group = try await cloud.createGroup(name: name, members: [SavedFriend(id: accountID, name: self.name)] + selected)
+            guard token == session else { return nil }
+            groups.insert(group, at: 0)
+            dataRevision += 1
+            return group
+        } catch { if token == session { self.error = error.localizedDescription }; return nil }
+    }
+
+    func invite(_ group: PaymentGroup) async {
+        guard connected, !busy else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            let controller = try await cloud.sharingController(for: group)
+            guard token == session else { return }
+            sharingController = controller
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
     func invite(_ bill: Bill) async {
         guard connected else { error = "Connect iCloud to invite people on their own devices."; return }
+        guard !busy else { return }
         let token = session
         busy = true
         defer { finish(token) }
@@ -227,10 +355,16 @@ final class AppStore {
     }
     func enableNotifications() async {
         guard connected else { error = "Connect iCloud first, then enable notifications."; return }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        if settings.authorizationStatus == .denied {
+            notificationsDenied = true
+            if let url = URL(string: UIApplication.openSettingsURLString) { await UIApplication.shared.open(url) }
+            return
+        }
         let token = session
         do {
             let enabled = try await cloud.configureNotifications()
-            if token == session { notificationsEnabled = enabled; await cloud.syncRecurringReminders(bills) }
+            if token == session { notificationsEnabled = enabled; notificationsDenied = !enabled; await cloud.syncRecurringReminders(bills) }
         }
         catch { if token == session { self.error = error.localizedDescription } }
     }

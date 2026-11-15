@@ -144,6 +144,12 @@ def validate_request(data: object) -> dict:
         raise APIError(422, "invalid_request", message)
     if not isinstance(data, dict):
         fail("Send a bill object.")
+    personal_pricing = data.get("pricingVersion") == 2 and type(data.get("pricingVersion")) is int
+    if "pricingVersion" in data and not personal_pricing:
+        fail("Use pricingVersion 2 for itemized personal tips and fees.")
+    component_keys = ("foodCents", "taxCents", "tipCents", "feeCents")
+    if not personal_pricing and any(key in data for key in ("subtotalCents", "taxCents", "tipCents", "feeCents")):
+        fail("Itemized prices require pricingVersion 2.")
     try:
         bill_id = str(uuid.UUID(data.get("billID", ""))).upper()
     except (ValueError, TypeError, AttributeError):
@@ -170,14 +176,59 @@ def validate_request(data: object) -> dict:
             fail("Every member must have claimed a unique account.")
         if approved is not True or type(share) is not int or not 0 <= share <= MAX_CENTS:
             fail("Every member must approve a valid integer-cent portion.")
-        people.append({"accountID": account, "approved": True, "shareCents": share})
+        person = {"accountID": account, "approved": True, "shareCents": share}
+        if personal_pricing:
+            for key in component_keys:
+                value = member.get(key)
+                if type(value) is not int or not 0 <= value <= MAX_CENTS:
+                    fail("Every price component must be a nonnegative integer-cent amount.")
+                person[key] = value
+            if sum(person[key] for key in component_keys) != share:
+                fail("Each person's charge must equal their food, tax, tip, and fee.")
+        elif any(key in member for key in component_keys):
+            fail("Itemized prices require pricingVersion 2.")
+        people.append(person)
     identities = [p["accountID"] for p in people]
     if len(set(identities)) != len(identities) or identities.count(leader) != 1:
         fail("Each account must be unique, and the leader must be a member.")
-    if sum(p["shareCents"] for p in people) != cents:
+    canonical = {"billID": bill_id, "cycle": cycle, "amountCents": cents, "currency": "USD", "leaderID": leader,
+                 "members": sorted(people, key=lambda p: p["accountID"])}
+    if personal_pricing:
+        totals = {}
+        for key in ("subtotalCents", "taxCents", "tipCents", "feeCents"):
+            value = data.get(key)
+            if type(value) is not int or not 0 <= value <= MAX_CENTS:
+                fail("Every bill component must be a nonnegative integer-cent amount.")
+            totals[key] = value
+        subtotal, tax, tip, fee = (totals[key] for key in ("subtotalCents", "taxCents", "tipCents", "feeCents"))
+        base = subtotal + tax
+        if subtotal <= 0 or base > MAX_CENTS or subtotal + tax + tip != cents:
+            fail("The funded card amount must equal food, tax, and personal tips.")
+        # The service fee is charged separately in simulated accounting. It is
+        # never added to the merchant's card or compounded by personal tips.
+        if fee != (base + 50) // 100:
+            fail("The service fee must equal 1% of food plus tax, rounded to the nearest cent.")
+        if cents + fee > MAX_CENTS or sum(p["shareCents"] for p in people) != cents + fee:
+            fail("Approved charges must equal the funded card amount plus the service fee.")
+        for member_key, bill_key in zip(component_keys, ("subtotalCents", "taxCents", "tipCents", "feeCents")):
+            if sum(p[member_key] for p in people) != totals[bill_key]:
+                fail("Personal price components must add up to the corresponding bill totals.")
+        for person in people:
+            # Largest-remainder allocation may assign either floor or ceiling
+            # of the exact proportion. Member order is not part of API identity.
+            for actual, numerator, denominator in (
+                (person["taxCents"], person["foodCents"] * tax, subtotal),
+                (person["feeCents"], (person["foodCents"] + person["taxCents"]) * fee, base),
+            ):
+                floor, remainder = divmod(numerator, denominator)
+                if actual not in (floor, floor + bool(remainder)):
+                    fail("Tax and service fees must follow each person's pre-tip portion.")
+        canonical.update(pricingVersion=2, **totals)
+    elif sum(p["shareCents"] for p in people) != cents:
         fail("Member portions must add up to the bill total.")
-    return {"billID": bill_id, "cycle": cycle, "amountCents": cents, "currency": "USD", "leaderID": leader,
-            "members": sorted(people, key=lambda p: p["accountID"])}
+    # Do not add fields to legacy canonical requests: their persisted hashes
+    # identify existing cards and uncertain funding operations.
+    return canonical
 
 
 def cents_of(value) -> int:

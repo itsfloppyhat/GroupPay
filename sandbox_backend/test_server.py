@@ -1,6 +1,7 @@
 """Offline behavioral/security tests. No credentials or network calls to Marqeta."""
 import copy
 from dataclasses import replace
+import hashlib
 import http.client
 from http.server import HTTPServer
 import json
@@ -24,6 +25,13 @@ BILL = {"billID": "8800755C-AE74-4510-93AE-A10A6C28EDFE", "cycle": 1, "amountCen
         "currency": "USD", "leaderID": "leader-private-account",
         "members": [{"accountID": "leader-private-account", "approved": True, "shareCents": 500},
                     {"accountID": "guest-private-account", "approved": True, "shareCents": 501}]}
+V2_BILL = {"billID": "95910E30-051E-482F-87FD-4B557358FD1D", "cycle": 1,
+           "pricingVersion": 2, "amountCents": 2600, "subtotalCents": 2000,
+           "taxCents": 200, "tipCents": 400, "feeCents": 22,
+           "currency": "USD", "leaderID": "leader-private-account",
+           "members": [{"accountID": account, "approved": True, "foodCents": 1000,
+                        "taxCents": 100, "tipCents": 200, "feeCents": 11, "shareCents": 1311}
+                       for account in ("leader-private-account", "guest-private-account")]}
 
 
 class FakeMarqeta:
@@ -119,6 +127,71 @@ class ValidationTests(unittest.TestCase):
             body["members"][1]["shareCents"] = total
             self.assertEqual(validate_request(body)["amountCents"], total)
 
+    def test_legacy_canonical_digest_is_unchanged(self):
+        canonical = validate_request(BILL)
+        digest = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertEqual(digest, "ef83e51d8fed04ded1ccc4b387b8b08077e5357f74414061834ea873859938eb")
+        self.assertNotIn("pricingVersion", canonical)
+
+    def test_personal_tip_change_does_not_change_fee(self):
+        before = validate_request(V2_BILL)
+        changed = copy.deepcopy(V2_BILL)
+        changed["tipCents"] += 100
+        changed["amountCents"] += 100
+        changed["members"][0]["tipCents"] += 100
+        changed["members"][0]["shareCents"] += 100
+        after = validate_request(changed)
+        self.assertEqual(before["feeCents"], 22)
+        self.assertEqual(after["feeCents"], 22)
+        self.assertEqual([p["feeCents"] for p in before["members"]], [p["feeCents"] for p in after["members"]])
+        self.assertEqual(after["amountCents"], 2700)
+        self.assertEqual(sum(p["shareCents"] for p in after["members"]), 2722)
+
+    def test_v2_rejects_tampered_components_or_missing_version(self):
+        invalid = []
+        for target, key, value in (("bill", "pricingVersion", True), ("bill", "pricingVersion", 3),
+                                   ("bill", "taxCents", True), ("bill", "tipCents", 400.0),
+                                   ("bill", "subtotalCents", 1999), ("bill", "amountCents", 2622),
+                                   ("member", "foodCents", 999), ("member", "feeCents", -1),
+                                   ("member", "tipCents", "200"), ("member", "shareCents", 1300)):
+            body = copy.deepcopy(V2_BILL)
+            (body if target == "bill" else body["members"][0])[key] = value
+            invalid.append(body)
+        body = copy.deepcopy(V2_BILL)
+        del body["pricingVersion"]
+        invalid.append(body)
+        body = copy.deepcopy(V2_BILL)
+        # A self-consistent fee on food + tax + tip is still the wrong fee base.
+        body["feeCents"] = 26
+        for person in body["members"]:
+            person["feeCents"] = 13
+            person["shareCents"] = 1313
+        invalid.append(body)
+        for body in invalid:
+            with self.subTest(body=body):
+                self.expect_invalid(body)
+
+    def test_v2_fee_rounds_half_up_and_zero_shares_do_not_pay_tax_or_fee(self):
+        for subtotal, fee in ((1, 0), (49, 0), (50, 1), (149, 1), (150, 2)):
+            body = copy.deepcopy(V2_BILL)
+            body.update(subtotalCents=subtotal, taxCents=0, tipCents=0, feeCents=fee, amountCents=subtotal)
+            body["members"][0].update(foodCents=0, taxCents=0, tipCents=0, feeCents=0, shareCents=0)
+            body["members"][1].update(foodCents=subtotal, taxCents=0, tipCents=0, feeCents=fee, shareCents=subtotal+fee)
+            self.assertEqual(validate_request(body)["feeCents"], fee)
+        body = copy.deepcopy(V2_BILL)
+        body["members"][0].update(foodCents=0, taxCents=100, tipCents=0, feeCents=11, shareCents=111)
+        body["members"][1].update(foodCents=2000, taxCents=100, tipCents=400, feeCents=11, shareCents=2511)
+        self.expect_invalid(body)
+
+    def test_v2_tax_and_fee_must_be_proportional_not_merely_sum_correctly(self):
+        for component in ("taxCents", "feeCents"):
+            body = copy.deepcopy(V2_BILL)
+            body["members"][0][component] += 2
+            body["members"][0]["shareCents"] += 2
+            body["members"][1][component] -= 2
+            body["members"][1]["shareCents"] -= 2
+            self.expect_invalid(body)
+
     def test_only_official_sandbox_origin_allowed(self):
         self.assertEqual(sandbox_url("https://sandbox-api.marqeta.com:443/v3/"), CONFIG.base_url)
         for url in ("https://api.marqeta.com/v3", "http://sandbox-api.marqeta.com/v3",
@@ -186,6 +259,38 @@ class IssuerTests(unittest.TestCase):
         for secret in ("4111111111119876", CONFIG.application_token, CONFIG.admin_token, CLIENT_TOKEN,
                        "leader-private-account", "guest-private-account", "cvv_number"):
             self.assertNotIn(secret.encode(), raw)
+
+    def test_v2_funds_only_merchant_total_and_replays_exact_approved_breakdown(self):
+        result = self.issuer.issue(V2_BILL)
+        self.assertEqual(result["loadedCents"], 2600)
+        self.assertEqual(result["remainingCents"], 2600)
+        order = self.provider.posts("/gpaorders")[0][2]
+        self.assertEqual(order["amount"], 26.00)
+        calls = len(self.provider.calls)
+        reordered = copy.deepcopy(V2_BILL)
+        reordered["members"].reverse()
+        self.assertEqual(self.issuer.issue(reordered), result)
+        self.assertEqual(len(self.provider.calls), calls)
+        changed = copy.deepcopy(V2_BILL)
+        changed["members"][0]["tipCents"] += 100
+        changed["members"][0]["shareCents"] += 100
+        changed["tipCents"] += 100
+        changed["amountCents"] += 100
+        self.assert_api_error("bill_changed", lambda: self.issuer.issue(changed))
+        self.assertEqual(len(self.provider.calls), calls)
+        self.issuer.close()
+        self.issuer = Issuer(CONFIG, self.path, self.provider)
+        self.assertEqual(self.issuer.issue(V2_BILL), result)
+        self.assertEqual(len(self.provider.posts("/gpaorders")), 1)
+
+    def test_v2_malformed_fee_cannot_reserve_intent_or_call_provider(self):
+        changed = copy.deepcopy(V2_BILL)
+        changed["feeCents"] = 26
+        changed["members"][0]["feeCents"] += 4
+        changed["members"][0]["shareCents"] += 4
+        self.assert_api_error("invalid_request", lambda: self.issuer.issue(changed))
+        self.assert_api_error("not_found", lambda: self.issuer.lookup(V2_BILL["billID"], 1))
+        self.assertEqual(self.provider.calls, [])
 
     def test_card_and_funding_timeout_after_provider_accepts_recovers_once(self):
         self.provider.timeout_after_create = {"/cards", "/gpaorders"}

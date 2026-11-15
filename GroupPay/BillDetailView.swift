@@ -5,9 +5,27 @@ struct BillDetailView: View {
     let billID: UUID
     @State private var confirmingPayment = false
     @State private var claiming: BillMember?
+    @State private var tipSelection = TipSelection()
     @ScaledMetric(relativeTo: .largeTitle) private var totalSize = 52.0
     @ScaledMetric(relativeTo: .largeTitle) private var portionSize = 34.0
     private var bill: Bill? { store.bills.first { $0.id == billID } }
+    private var tipMember: BillMember? {
+        guard let bill else { return nil }
+        if store.isPreview { return bill.members.first }
+        guard let accountID = store.accountID else { return nil }
+        return bill.members.first { $0.accountID == accountID }
+    }
+    private struct TipStamp: Equatable {
+        let memberID: UUID
+        let cycle: Int
+        let percent: Int?
+        let amount: Int?
+    }
+    private var personalTipStamp: TipStamp? {
+        guard let bill, let member = tipMember else { return nil }
+        return TipStamp(memberID: member.id, cycle: bill.cycle,
+                        percent: member.tipPercent, amount: member.tipOverrideCents)
+    }
 
     var body: some View {
         ScrollView {
@@ -31,7 +49,7 @@ struct BillDetailView: View {
                         }
                     }.padding(.vertical, 8)
                     stages(bill)
-                    if bill.card != nil { VirtualCardView(bill: bill) }
+                    if isLeader(bill) && bill.card != nil { VirtualCardView(bill: bill) }
                     actionPanel(bill)
                     Panel {
                         HStack {
@@ -55,9 +73,13 @@ struct BillDetailView: View {
                             if index < bill.members.count - 1 { Divider().overlay(GP.secondary.opacity(0.08)) }
                         }
                         if isLeader(bill) && bill.status == .collecting {
-                            Button { Task { await store.invite(bill) } } label: { Label("Invite your group", systemImage: "person.badge.plus") }
-                                .font(.subheadline.bold()).foregroundStyle(GP.mint).padding(.top, 8).disabled(store.busy)
-                            Text("Send an invitation so everyone can join and approve their part.").font(.caption).foregroundStyle(GP.secondary)
+                            Button { Task { await store.invite(bill) } } label: {
+                                Label(bill.groupID == nil ? "Invite your group" : "Manage group invitation", systemImage: "person.badge.plus")
+                            }.font(.subheadline.bold()).foregroundStyle(GP.mint).padding(.top, 8).disabled(store.busy)
+                            Text(bill.groupID == nil
+                                 ? "Send an invitation so everyone can join and approve their part."
+                                 : "Once your friends accept the group invitation, future bills appear here without another link.")
+                                .font(.caption).foregroundStyle(GP.secondary)
                         }
                     }
                     Panel {
@@ -83,8 +105,20 @@ struct BillDetailView: View {
                         Divider()
                         amountRow("Subtotal", bill.subtotalCents)
                         amountRow("Tax", bill.taxCents)
-                        amountRow("Tip", bill.tipCents)
-                        HStack { Text("Total").bold(); Spacer(); Text(Money.string(cents: bill.totalCents)).bold() }
+                        amountRow(bill.usesPersonalPricing ? "Personal tips" : "Tip", bill.totalTipCents)
+                        if bill.usesPersonalPricing {
+                            amountRow("Group Pay fee · 1%", bill.feeCents)
+                        }
+                        HStack {
+                            Text(bill.usesPersonalPricing ? "Total contributions" : "Total").bold()
+                            Spacer()
+                            Text(Money.string(cents: bill.totalCents)).bold()
+                        }
+                        if bill.usesPersonalPricing {
+                            amountRow("Amount for the card", bill.cardAmountCents)
+                            Text("The card covers the receipt and everyone’s tips. The Group Pay fee is separate and never includes tips.")
+                                .font(.caption).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     if bill.recurrence != .none {
                         Panel {
@@ -119,6 +153,8 @@ struct BillDetailView: View {
             }
         }.navigationTitle("Split details").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).gpPage()
             .refreshable { await store.refresh() }
+            .onAppear { restorePersonalTip() }
+            .onChange(of: personalTipStamp) { _, _ in restorePersonalTip() }
             .confirmationDialog("Make a test payment?", isPresented: $confirmingPayment, titleVisibility: .visible) {
                 Button("Pay \(Money.string(cents: bill?.totalCents ?? 0)) in test mode") {
                     Task { await store.change(billID) { try $0.pay(accountID: $1) } }
@@ -153,11 +189,85 @@ struct BillDetailView: View {
             Text(title).font(.caption)
         }.foregroundStyle(done || active ? GP.mint : GP.secondary).frame(width: 66)
     }
+    private func restorePersonalTip() {
+        guard let bill, let member = tipMember else { return }
+        tipSelection = TipSelection(bill: bill, member: member)
+    }
+
+    private func personalTipChanged(_ bill: Bill, member: BillMember) -> Bool {
+        let saved = TipSelection(bill: bill, member: member)
+        if tipSelection.customAmount != nil, saved.customAmount != nil {
+            let food = bill.foodShares[member.id] ?? 0
+            return tipSelection.amountCents(foodCents: food) != saved.amountCents(foodCents: food)
+        }
+        return tipSelection != saved
+    }
+
+    private func draftCharge(_ bill: Bill, member: BillMember) -> Int? {
+        guard bill.validationMessage == nil,
+              let tip = tipSelection.amountCents(foodCents: bill.foodShares[member.id] ?? 0) else { return nil }
+        let revisedTotal = bill.totalCents - (bill.tipShares[member.id] ?? 0) + tip
+        guard (1...Bill.maximumCents).contains(revisedTotal) else { return nil }
+        return (bill.foodShares[member.id] ?? 0) + (bill.taxShares[member.id] ?? 0) + (bill.feeShares[member.id] ?? 0) + tip
+    }
+
+    private func personalPortion(_ bill: Bill, member: BillMember, preview: Bool = false) -> some View {
+        let charge = draftCharge(bill, member: member)
+        let changed = personalTipChanged(bill, member: member)
+        return Panel {
+            Eyebrow(text: preview ? "Try your portion" : "Your part")
+            Text(charge.map { Money.string(cents: $0) } ?? "—")
+                .font(.system(size: portionSize, weight: .semibold, design: .rounded))
+            if preview {
+                Text("Move the tip slider to see your amount change. This sample won’t send an approval or create a card.")
+                    .font(.subheadline).foregroundStyle(GP.secondary)
+            } else {
+                Text(member.approved && !changed ? "Your portion is approved." : "Choose your tip, then approve your total.")
+                    .font(.subheadline).foregroundStyle(GP.secondary)
+            }
+            PersonalTipEditor(foodCents: bill.foodShares[member.id] ?? 0,
+                              taxCents: bill.taxShares[member.id] ?? 0,
+                              feeCents: bill.feeShares[member.id] ?? 0,
+                              selection: $tipSelection, disabled: store.busy)
+            if charge == nil {
+                Text("Check your tip amount. The full bill must stay within $100,000, including tips and fees.")
+                    .font(.caption).foregroundStyle(GP.amber)
+            }
+            if !preview {
+                if !member.approved || changed {
+                    Button(member.approved ? "Update approval" : "Approve my \(charge.map { Money.string(cents: $0) } ?? "total")") {
+                        let selected = tipSelection
+                        Task { await store.approvePortion(bill.id, selection: selected) }
+                    }.buttonStyle(PrimaryButton()).disabled(store.busy || charge == nil)
+                }
+                if isLeader(bill) {
+                    confirmationButton(bill, hasTipDraft: changed || charge == nil)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func confirmationButton(_ bill: Bill, hasTipDraft: Bool = false) -> some View {
+        Button { Task { await store.confirmCard(bill.id) } } label: {
+            Label(store.busy ? "Working…" : "Confirm & create test card", systemImage: "creditcard")
+        }.buttonStyle(PrimaryButton()).disabled(!bill.allApproved || store.busy || hasTipDraft)
+        if hasTipDraft {
+            Text("Approve your updated tip before creating the card.").font(.caption).foregroundStyle(GP.secondary)
+        } else if !bill.allApproved {
+            Text("Ready to confirm once everyone has approved.").font(.caption).foregroundStyle(GP.secondary)
+        }
+    }
+
     @ViewBuilder private func actionPanel(_ bill: Bill) -> some View {
         if store.isPreview {
-            Panel {
-                Label("A sample split", systemImage: "eye").font(.headline)
-                Text("Explore how a split works. Sign in from Profile to create your own and invite your group.").font(.subheadline).foregroundStyle(GP.secondary)
+            if bill.usesPersonalPricing, bill.status == .collecting, let member = bill.members.first {
+                personalPortion(bill, member: member, preview: true)
+            } else {
+                Panel {
+                    Label("A sample split", systemImage: "eye").font(.headline)
+                    Text("Explore how a split works. Sign in from Profile to create your own and invite your group.")
+                        .font(.subheadline).foregroundStyle(GP.secondary)
+                }
             }
         } else if bill.status == .paid {
             Panel {
@@ -166,41 +276,57 @@ struct BillDetailView: View {
             }
         } else if bill.status == .issuing {
             Panel {
-                Label("Creating your test card", systemImage: "creditcard").font(.headline)
-                Text("Your group has approved the split. Finish creating the card to cover the bill.").font(.subheadline).foregroundStyle(GP.secondary)
+                Label(isLeader(bill) ? "Creating your test card" : "The leader is creating the card", systemImage: "creditcard")
+                    .font(.headline)
+                Text("Your group has approved the split. The card will be available only to the leader.")
+                    .font(.subheadline).foregroundStyle(GP.secondary)
                 if isLeader(bill) {
                     Button(store.busy ? "Working…" : "Resume card creation") { Task { await store.confirmCard(bill.id) } }
                         .buttonStyle(PrimaryButton()).disabled(store.busy)
                 }
             }
-        } else if bill.status == .cardReady && bill.card?.provider == "marqetaSandbox" {
-            Panel {
-                Label("Your test card is ready", systemImage: "checkmark.circle.fill").font(.headline).foregroundStyle(GP.mint)
-                Text("The full bill amount is on your test card.").font(.subheadline).foregroundStyle(GP.secondary)
-                Text("Payments are coming soon. This bill hasn’t been paid.").font(.caption).foregroundStyle(GP.secondary)
-            }
         } else if bill.status == .cardReady {
             Panel {
-                Text("Your test card is ready").font(.headline)
-                Text("The full bill amount is on your test card.").font(.subheadline).foregroundStyle(GP.secondary)
-                if isLeader(bill) { Button("Make a test payment") { confirmingPayment = true }.buttonStyle(PrimaryButton()).disabled(store.busy) }
-                else { Text("The leader will finish the payment.").font(.caption).foregroundStyle(GP.secondary) }
+                Label(isLeader(bill) ? "Your test card is ready" : "Leader’s card is ready", systemImage: "checkmark.circle.fill")
+                    .font(.headline).foregroundStyle(GP.mint)
+                if isLeader(bill) {
+                    Text("The card covers \(Money.string(cents: bill.cardAmountCents)) for the receipt and tips.")
+                        .font(.subheadline).foregroundStyle(GP.secondary)
+                    if bill.usesPersonalPricing {
+                        Text("The \(Money.string(cents: bill.feeCents)) Group Pay fee is separate from the card.")
+                            .font(.caption).foregroundStyle(GP.secondary)
+                    }
+                    if bill.card?.provider == "marqetaSandbox" {
+                        Text("Payments are coming soon. This bill hasn’t been paid.").font(.caption).foregroundStyle(GP.secondary)
+                    } else if bill.card != nil {
+                        Button("Make a test payment") { confirmingPayment = true }
+                            .buttonStyle(PrimaryButton()).disabled(store.busy)
+                    } else {
+                        Text("Pull to refresh to load your private card details.").font(.caption).foregroundStyle(GP.secondary)
+                    }
+                } else {
+                    Text("Only the leader can view and use the test card. Your approval is saved.")
+                        .font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("This bill hasn’t been paid yet.").font(.caption).foregroundStyle(GP.secondary)
+                }
             }
         } else if let member = bill.members.first(where: { $0.accountID == store.accountID && store.accountID != nil }) {
-            Panel {
-                Eyebrow(text: "Your part")
-                Text(Money.string(cents: bill.shares[member.id] ?? 0)).font(.system(size: portionSize, weight: .semibold, design: .rounded))
-                Text(member.approved ? "Your portion is approved." : "Review the receipt and approve your portion.").font(.subheadline).foregroundStyle(GP.secondary)
-                if !member.approved {
-                    Button("Approve my \(Money.string(cents: bill.shares[member.id] ?? 0))") {
-                        Task { await store.change(bill.id) { try $0.approve(accountID: $1) } }
-                    }.buttonStyle(PrimaryButton()).disabled(store.busy)
-                }
-                if isLeader(bill) {
-                    Button { Task { await store.confirmCard(bill.id) } } label: {
-                        Label(store.busy ? "Working…" : "Confirm & create test card", systemImage: "creditcard")
-                    }.buttonStyle(PrimaryButton()).disabled(!bill.allApproved || store.busy)
-                    if !bill.allApproved { Text("Ready to confirm once everyone has approved.").font(.caption).foregroundStyle(GP.secondary) }
+            if bill.usesPersonalPricing {
+                personalPortion(bill, member: member)
+            } else {
+                Panel {
+                    Eyebrow(text: "Your part")
+                    Text(Money.string(cents: bill.shares[member.id] ?? 0))
+                        .font(.system(size: portionSize, weight: .semibold, design: .rounded))
+                    Text(member.approved ? "Your portion is approved." : "Review the receipt and approve your portion.")
+                        .font(.subheadline).foregroundStyle(GP.secondary)
+                    if !member.approved {
+                        Button("Approve my \(Money.string(cents: bill.shares[member.id] ?? 0))") {
+                            Task { await store.change(bill.id) { try $0.approve(accountID: $1) } }
+                        }.buttonStyle(PrimaryButton()).disabled(store.busy)
+                    }
+                    if isLeader(bill) { confirmationButton(bill) }
+                    Text("This existing bill keeps its original agreed amounts.").font(.caption).foregroundStyle(GP.secondary)
                 }
             }
         } else {
@@ -209,11 +335,18 @@ struct BillDetailView: View {
                 Text("Choose your name, then review your part before approving.").font(.subheadline).foregroundStyle(GP.secondary)
                 ForEach(bill.members.filter { $0.accountID == nil }) { member in
                     Button { claiming = member } label: {
-                        HStack { Avatar(name: member.name); Text("I’m \(member.name)"); Spacer(); Text(Money.string(cents: bill.shares[member.id] ?? 0)); Image(systemName: "chevron.right") }
-                            .font(.subheadline).foregroundStyle(GP.mint)
+                        HStack {
+                            Avatar(name: member.name)
+                            Text("I’m \(member.name)")
+                            Spacer()
+                            Text(Money.string(cents: bill.shares[member.id] ?? 0))
+                            Image(systemName: "chevron.right")
+                        }.font(.subheadline).foregroundStyle(GP.mint)
                     }.disabled(store.busy)
                 }
-                if bill.members.allSatisfy({ $0.accountID != nil }) { Text("Everyone has joined. Ask the leader if your name is missing.").font(.caption).foregroundStyle(GP.amber) }
+                if bill.members.allSatisfy({ $0.accountID != nil }) {
+                    Text("Everyone has joined. Ask the leader if your name is missing.").font(.caption).foregroundStyle(GP.amber)
+                }
             }
         }
     }

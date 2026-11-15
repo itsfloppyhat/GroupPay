@@ -111,3 +111,11 @@ python3 -m unittest test_server test_storage -v
 These standard-library suites use a mock Marqeta transport, temporary local HTTP servers, and isolated transaction-model storage. Install `requirements-cloud.txt` in a virtual environment to also run `test_cloud_app` as described in [cloud verification](cloud/README.md). It tests cents and approval validation, endpoint restrictions, authentication, masked results, same-intent concurrency, restart recovery, accepted-but-timed-out creation/funding, no blind duplicate funding, partial failures, and changed snapshots/applications. It makes no requests to Marqeta.
 
 A separate credentialed check on November 14, 2026 issued an active $10.00 virtual card from the iPhone 18 Pro Max simulator. Replaying the same request returned its saved funded result without another provider creation or funding attempt. Rerun that connection test when changing credentials or hosting.
+
+## Personal tips and fee contract (pricing version 2)
+
+New requests include `pricingVersion: 2`, `subtotalCents`, `taxCents`, `tipCents` (sum of personal tips), and `feeCents`. `amountCents` is the merchant-card funding amount: subtotal + tax + personal tips. Every member includes `foodCents`, `taxCents`, `tipCents`, `feeCents`, and `shareCents` (the sum of those components). Approved shares total `amountCents + feeCents`.
+
+The fee is 1% of subtotal + tax, rounded half-up to cents. Tax and fees follow each member’s pre-tip allocation with deterministic cent distribution. Changing tips cannot change the fee. The backend verifies component totals and proportional allocation bounds before contacting Marqeta. It funds only `amountCents`; it does not collect or transfer fees. All fees remain simulated accounting.
+
+Legacy requests omit these fields and retain the same canonical hash and retry behavior. New request fields cannot be mixed into a legacy request. The authenticated status response advertises `supportedPricingVersions: [1, 2]`. Run `python3 Tests/check_pricing_contract.py` from the repository root for cross-language fixtures using the actual Swift request encoder.

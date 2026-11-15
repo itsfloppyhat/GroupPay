@@ -210,23 +210,12 @@ final class SandboxCardService {
 
     func issue(for bill: Bill) async throws -> SandboxIssuedCard {
         guard bill.status == .issuing, bill.card == nil, bill.allApproved,
-              bill.totalCents > 0, bill.totalCents <= Bill.maximumCents else { throw SandboxConnectionError.invalidBill }
-        struct Member: Encodable { let accountID: String; let approved: Bool; let shareCents: Int }
-        struct Issuance: Encodable {
-            let billID: String
-            let cycle: Int
-            let amountCents: Int
-            let currency: String
-            let leaderID: String
-            let members: [Member]
-        }
-        let payload = Issuance(billID: bill.id.uuidString, cycle: bill.cycle, amountCents: bill.totalCents,
-                               currency: "USD", leaderID: bill.leaderID,
-                               members: bill.members.map { Member(accountID: $0.accountID ?? "", approved: $0.approved, shareCents: bill.shares[$0.id] ?? 0) })
+              bill.cardAmountCents > 0, bill.totalCents <= Bill.maximumCents else { throw SandboxConnectionError.invalidBill }
+        let payload = SandboxIssuanceRequest(bill: bill)
         let data = try await request(path: "v1/cards", method: "POST", body: JSONEncoder().encode(payload))
         guard let card = try? JSONDecoder().decode(SandboxIssuedCard.self, from: data),
               card.provider == "marqetaSandbox", card.state == "ACTIVE",
-              card.loadedCents == bill.totalCents, card.remainingCents == bill.totalCents,
+              card.loadedCents == bill.cardAmountCents, card.remainingCents == bill.cardAmountCents,
               card.lastFour.utf8.count == 4, card.lastFour.utf8.allSatisfy({ (48...57).contains($0) }),
               !card.cardToken.isEmpty, card.cardToken.utf8.count <= 40,
               card.cardToken.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }),

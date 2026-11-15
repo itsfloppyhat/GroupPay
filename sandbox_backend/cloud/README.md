@@ -12,7 +12,7 @@ Marqeta credentials stay in Secret Manager. The public service URL is bundled in
 
 ## Limits and durable state
 
-- At most **$500.00 per new cloud sandbox intent**, in exact integer USD cents. Previously reserved local intents remain recoverable after migration, including larger bills; their original immutable request must match before any provider reconciliation.
+- At most **$500.00 funded on a new cloud sandbox card**, in exact integer USD cents. The 1% fee is separate and does not count toward the card funding cap. Previously reserved local intents remain recoverable after migration, including larger bills; their original immutable request must match before any provider reconciliation.
 - At most **100 new issuance intents per UTC day for the whole team**, reserved transactionally with the new intent. Retries/reconciliation do not consume another intent quota. A failed first attempt still reserves its intent and quota.
 - Firestore Native stores immutable intent bindings, masked results, and provider-attempt markers. There is **no SQLite fallback** in Cloud Run and no TTL on these records. Losing or manually deleting this journal can undermine reconciliation safety; retain it across redeployments and credential rotation.
 - Every uncertain provider operation is reconciled by its original resource token, never blindly repeated. A request timeout does not mean a provider operation failed.
@@ -86,3 +86,5 @@ References: [Cloud Run billing settings](https://docs.cloud.google.com/run/docs/
 On November 14, 2026, project `group-pay-itsfloppyhat` was configured with a $5/month Cloud Run spend cap and $5/month project-wide budget alerts at 50%, 80%, and 100%. The Run cap pauses new Cloud Run usage when estimated gross charges cross the threshold, with possible enforcement delay; it resets monthly. It does not cap Firestore, Secret Manager, image/source storage, builds, or other services. The project-wide budget only alerts. See [spend-cap behavior](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps) and [Cloud Run pricing](https://cloud.google.com/run/pricing).
 
 The local journal was migrated before cloud traffic: one completed intent and five attempt markers, verified by an idempotent second import. Keep that original journal. Four independent real Firestore clients also passed isolated concurrency, quota, replay, conflict, and ownership-fencing checks; all test records were removed.
+
+Pricing version 2 accepts per-person food, tax, tip, and fee components. Only food + tax + tips are funded onto the card. The fee is simulated accounting. The November 14, 2026 hosted check verified $13.30 funding with a separate $0.11 fee, exact replay, and rejection of altered approved tips or a fee inflated by tips.

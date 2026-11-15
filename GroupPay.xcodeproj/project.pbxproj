@@ -8,8 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		0BBD34B655D64D87165628EE /* NewBillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADA1A8A705908E8FCC57D99 /* NewBillView.swift */; };
+		0BDE682424EAE1475343C341 /* SandboxIssuanceRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */; };
+		0DC6E6CB0A42A6748DEB690D /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4861FCB408C852C40A7C64 /* PeopleView.swift */; };
 		135A50CF343985D58A630A24 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86C384643AB6F58170F1C47 /* ContentView.swift */; };
 		22F5E87AC3A07401EB00BBBE /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A6FB61169DAA29A9EB21147 /* Models.swift */; };
+		30ED997A215C1B54CD5043F4 /* PersonalTipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 470831E93FE577577A7FBDCA /* PersonalTipView.swift */; };
 		38725A1AF59CF9E7368A909F /* GroupPayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614496DD3A8E59DD41B165AE /* GroupPayApp.swift */; };
 		6309B72E57DC433ED45613FA /* CloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */; };
 		645308E1E9AF77CA7B6FB508 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC21687612EC19E16494AFFB /* Design.swift */; };
@@ -17,24 +20,29 @@
 		B449D8EE0929CD1C234D9D66 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FECC86FB5DA8F10FB920211 /* AppStore.swift */; };
 		C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */; };
 		C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9227BFB34C0358647FF51C /* SandboxCardService.swift */; };
+		D38994815FDBCB17C58636F9 /* FriendsGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2C0C93DF73B56D85B952374 /* FriendsGroups.swift */; };
 		DFF4CC7774028A9C1D612287 /* BillDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A28EB4F2FA1B302FD4C252 /* BillDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0A395D442101948243C13891 /* GroupPay.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GroupPay.entitlements; sourceTree = "<group>"; };
 		1A6FB61169DAA29A9EB21147 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		470831E93FE577577A7FBDCA /* PersonalTipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalTipView.swift; sourceTree = "<group>"; };
 		4A9227BFB34C0358647FF51C /* SandboxCardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxCardService.swift; sourceTree = "<group>"; };
 		614496DD3A8E59DD41B165AE /* GroupPayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupPayApp.swift; sourceTree = "<group>"; };
 		79A28EB4F2FA1B302FD4C252 /* BillDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillDetailView.swift; sourceTree = "<group>"; };
+		9A4861FCB408C852C40A7C64 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		9FECC86FB5DA8F10FB920211 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
 		A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptScanner.swift; sourceTree = "<group>"; };
 		A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudService.swift; sourceTree = "<group>"; };
 		B86C384643AB6F58170F1C47 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C2C0C93DF73B56D85B952374 /* FriendsGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsGroups.swift; sourceTree = "<group>"; };
 		C34A73F6BE77DB3373AF36C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CADA1A8A705908E8FCC57D99 /* NewBillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBillView.swift; sourceTree = "<group>"; };
 		E12EFD039614A66880F2968A /* TeamAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamAccessView.swift; sourceTree = "<group>"; };
 		E6820F79EAF5B9CE1785C884 /* GroupPay.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GroupPay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC21687612EC19E16494AFFB /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxIssuanceRequest.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -62,13 +70,17 @@
 				A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */,
 				B86C384643AB6F58170F1C47 /* ContentView.swift */,
 				FC21687612EC19E16494AFFB /* Design.swift */,
+				C2C0C93DF73B56D85B952374 /* FriendsGroups.swift */,
 				0A395D442101948243C13891 /* GroupPay.entitlements */,
 				614496DD3A8E59DD41B165AE /* GroupPayApp.swift */,
 				C34A73F6BE77DB3373AF36C0 /* Info.plist */,
 				1A6FB61169DAA29A9EB21147 /* Models.swift */,
 				CADA1A8A705908E8FCC57D99 /* NewBillView.swift */,
+				9A4861FCB408C852C40A7C64 /* PeopleView.swift */,
+				470831E93FE577577A7FBDCA /* PersonalTipView.swift */,
 				A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */,
 				4A9227BFB34C0358647FF51C /* SandboxCardService.swift */,
+				FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */,
 				E12EFD039614A66880F2968A /* TeamAccessView.swift */,
 			);
 			path = GroupPay;
@@ -138,11 +150,15 @@
 				6309B72E57DC433ED45613FA /* CloudService.swift in Sources */,
 				135A50CF343985D58A630A24 /* ContentView.swift in Sources */,
 				645308E1E9AF77CA7B6FB508 /* Design.swift in Sources */,
+				D38994815FDBCB17C58636F9 /* FriendsGroups.swift in Sources */,
 				38725A1AF59CF9E7368A909F /* GroupPayApp.swift in Sources */,
 				22F5E87AC3A07401EB00BBBE /* Models.swift in Sources */,
 				0BBD34B655D64D87165628EE /* NewBillView.swift in Sources */,
+				0DC6E6CB0A42A6748DEB690D /* PeopleView.swift in Sources */,
+				30ED997A215C1B54CD5043F4 /* PersonalTipView.swift in Sources */,
 				C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */,
 				C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */,
+				0BDE682424EAE1475343C341 /* SandboxIssuanceRequest.swift in Sources */,
 				71D78A8BB02500CEB041707D /* TeamAccessView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -211,7 +227,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -269,7 +285,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;

@@ -147,7 +147,7 @@ def create_app(issuer=None) -> Flask:
     @app.route("/v1/status", methods=["GET"], provide_automatic_options=False)
     def status():
         return jsonify(ready=issuer.config.ready, environment="sandbox", maxAmountCents=MAX_CARD_CENTS,
-                       dailyNewIntentLimit=DAILY_NEW_INTENT_LIMIT)
+                       dailyNewIntentLimit=DAILY_NEW_INTENT_LIMIT, supportedPricingVersions=[1, 2])
 
     @app.route("/v1/cards", methods=["POST"], provide_automatic_options=False)
     def issue():
@@ -161,6 +161,8 @@ def create_app(issuer=None) -> Flask:
         except (ValueError, UnicodeError, RecursionError):
             return _error("invalid_json")
         validated = validate_request(data)
+        # amountCents is merchant funding; the v2 service fee stays outside the
+        # card balance and must not reduce the advertised $500 card allowance.
         if validated["amountCents"] > MAX_CARD_CENTS:
             # The cloud cap applies to NEW intents. A migrated local intent may
             # be larger and must remain recoverable. This lookup is read-only;

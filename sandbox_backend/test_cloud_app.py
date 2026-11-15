@@ -66,6 +66,7 @@ class CloudHTTPTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json["maxAmountCents"], MAX_CARD_CENTS)
         self.assertEqual(result.json["dailyNewIntentLimit"], DAILY_NEW_INTENT_LIMIT)
+        self.assertEqual(result.json["supportedPricingVersions"], [1, 2])
 
     def test_auth_is_constant_time_and_all_card_routes_protected(self):
         with patch("cloud_app.hmac.compare_digest", wraps=__import__("hmac").compare_digest) as compare:
@@ -212,6 +213,56 @@ class LegacyRecoveryTests(unittest.TestCase):
                 self.assertEqual(len(provider.calls), calls)
             finally:
                 issuer.close()
+
+
+class PersonalPricingHTTPTests(unittest.TestCase):
+    def test_cloud_v2_funds_food_tax_and_tips_without_fee_and_replays(self):
+        from server import Issuer
+        from test_server import FakeMarqeta, V2_BILL
+        with tempfile.TemporaryDirectory() as directory:
+            provider = FakeMarqeta()
+            issuer = Issuer(CONFIG, Path(directory) / "journal.sqlite3", provider)
+            try:
+                client = create_app(issuer).test_client()
+                headers = {"Authorization": "Bearer " + CLIENT_TOKEN}
+                result = client.post("/v1/cards", json=V2_BILL, headers=headers)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json["loadedCents"], 2600)
+                self.assertEqual(provider.posts("/gpaorders")[0][2]["amount"], 26.0)
+                self.assertEqual(client.post("/v1/cards", json=V2_BILL, headers=headers).json, result.json)
+                self.assertEqual(len(provider.posts("/gpaorders")), 1)
+                changed = copy.deepcopy(V2_BILL)
+                changed["feeCents"] = 26
+                changed["members"][0]["feeCents"] += 4
+                changed["members"][0]["shareCents"] += 4
+                response = client.post("/v1/cards", json=changed, headers=headers)
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.json["error"], "invalid_request")
+            finally:
+                issuer.close()
+
+    def test_cloud_card_cap_excludes_the_service_fee(self):
+        from test_server import V2_BILL
+        issuer = FakeIssuer()
+        issuer.lookup_missing = True
+        issuer.result = {**RESULT, "loadedCents": 50_000, "remainingCents": 50_000}
+        client = create_app(issuer).test_client()
+        body = copy.deepcopy(V2_BILL)
+        body.update(amountCents=50_000, subtotalCents=50_000, taxCents=0, tipCents=0, feeCents=500)
+        for person in body["members"]:
+            person.update(foodCents=25_000, taxCents=0, tipCents=0, feeCents=250, shareCents=25_250)
+        headers = {"Authorization": "Bearer " + CLIENT_TOKEN}
+        self.assertEqual(client.post("/v1/cards", json=body, headers=headers).status_code, 200)
+        self.assertEqual(issuer.calls[0]["amountCents"], 50_000)
+        self.assertEqual(sum(p["shareCents"] for p in issuer.calls[0]["members"]), 50_500)
+        body["amountCents"] += 1
+        body["subtotalCents"] += 1
+        body["members"][0]["foodCents"] += 1
+        body["members"][0]["shareCents"] += 1
+        response = client.post("/v1/cards", json=body, headers=headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json["error"], "amount_limit")
+        self.assertEqual(len(issuer.calls), 1)
 
 
 class DeploymentBoundaryTests(unittest.TestCase):

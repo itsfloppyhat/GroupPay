@@ -18,6 +18,7 @@ struct ContentView: View {
                 .tabItem { Label("Home", systemImage: "square.grid.2x2") }.tag(0)
             NavigationStack { activity }.tabItem { Label("Inbox", systemImage: "tray") }.badge(store.pendingBills.count).tag(1)
             NavigationStack { cards }.tabItem { Label("Cards", systemImage: "creditcard") }.tag(2)
+            NavigationStack { PeopleView() }.tabItem { Label("People", systemImage: "person.2") }.tag(4)
             NavigationStack { profile }.tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
         }
         .tint(GP.mint).preferredColorScheme(.dark)
@@ -40,6 +41,19 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .groupPayCloudError)) { note in store.error = note.userInfo?["message"] as? String }
         .onChange(of: phase) { _, new in if new == .active { Task { await store.refresh() } } }
         .onReceive(NotificationCenter.default.publisher(for: .groupPayCloudChanged)) { _ in Task { await store.refresh() } }
+        .onReceive(NotificationCenter.default.publisher(for: .groupPayOpenBill)) { note in
+            let id = (note.userInfo?["billID"] as? UUID) ?? (note.userInfo?["billID"] as? String).flatMap(UUID.init(uuidString:))
+            guard let id else { return }
+            Task { await store.refresh(); tab = 0; route = [id] }
+        }
+        .task(id: phase) {
+            // Reconcile visible approvals even when iOS coalesces a background push.
+            guard phase == .active else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                await store.refresh()
+            }
+        }
     }
 
     private var home: some View {
@@ -160,7 +174,7 @@ struct ContentView: View {
                                 Text("A heads-up when your group needs you.").font(.caption).foregroundStyle(GP.secondary)
                             }
                         }
-                        Button("Turn on notifications") { Task { await store.enableNotifications() } }.buttonStyle(PrimaryButton())
+                        Button(store.notificationsDenied ? "Open notification settings" : "Turn on notifications") { Task { await store.enableNotifications() } }.buttonStyle(PrimaryButton())
                     }
                 }
                 let reviewedBills = store.bills.filter { bill in !store.pendingBills.contains(where: { $0.id == bill.id }) }
@@ -175,24 +189,25 @@ struct ContentView: View {
     }
 
     private var cards: some View {
-        ScrollView {
+        let myCards = store.bills.filter { $0.card != nil && $0.leaderID == store.accountID && store.connected }
+        return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
                     Text("One card for every shared plan.").font(.subheadline).foregroundStyle(GP.secondary)
                     Spacer(minLength: 8)
                     TestModeBadge()
                 }
-                if !store.bills.contains(where: { $0.card != nil }) {
+                if myCards.isEmpty {
                     VStack(spacing: 24) {
                         CardIllustration().frame(height: 190).padding(.top, 28).accessibilityHidden(true)
                         VStack(spacing: 10) {
                             Text("Good things take a group.").font(.title2.weight(.semibold)).tracking(-0.5)
-                            Text("Once everyone approves their portion, your shared card will be right here.").font(.subheadline).foregroundStyle(GP.secondary).lineSpacing(4)
+                            Text("Cards for bills you lead appear here. Everyone else can follow the bill’s status in their inbox.").font(.subheadline).foregroundStyle(GP.secondary).lineSpacing(4)
                         }.multilineTextAlignment(.center).padding(.horizontal, 12)
                         Button("Start a split") { composing = true }.buttonStyle(PrimaryButton()).padding(.top, 6)
                     }.padding(.bottom, 12)
                 }
-                ForEach(store.bills.filter { $0.card != nil }) { bill in
+                ForEach(myCards) { bill in
                     NavigationLink { BillDetailView(billID: bill.id) } label: { VirtualCardView(bill: bill) }.buttonStyle(.plain)
                 }
                 Label("Test cards only. No real money moves.", systemImage: "leaf")
@@ -243,7 +258,7 @@ struct ContentView: View {
                         }
                         if !store.notificationsEnabled {
                             if store.connected {
-                                Button("Turn on notifications") { Task { await store.enableNotifications() } }
+                                Button(store.notificationsDenied ? "Open notification settings" : "Turn on notifications") { Task { await store.enableNotifications() } }
                                     .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
                             } else {
                                 Text("Connect iCloud to enable").font(.caption).foregroundStyle(GP.secondary)

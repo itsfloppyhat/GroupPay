@@ -17,7 +17,9 @@ struct NewBillView: View {
     @State private var category: BillCategory = .dining
     @State private var lines: [ReceiptLine] = []
     @State private var tax = "0.00"
-    @State private var tip = "0.00"
+    @State private var leaderTip = TipSelection()
+    @State private var selectedGroupID: UUID?
+    @State private var scannedTipCents = 0
     @State private var members = [BillMember(name: "You"), BillMember(name: "")]
     @State private var customAmounts: [UUID: String] = [:]
     @State private var method: SplitMethod = .equal
@@ -37,19 +39,21 @@ struct NewBillView: View {
         var people = members
         people[0].name = store.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "You" : store.name
         people[0].accountID = store.accountID ?? "draft-owner"
+        people[0].tipPercent = leaderTip.percent
+        people[0].tipOverrideCents = leaderTip.customAmount.map { Money.cents(from: $0) ?? -1 }
         for index in people.indices { people[index].customCents = Money.cents(from: customAmounts[people[index].id] ?? "0") ?? -1 }
         return Bill(title: title.trimmingCharacters(in: .whitespacesAndNewlines), category: category,
                     items: lines.map { BillItem(id: $0.id, name: $0.name, amountCents: Money.cents(from: $0.amount) ?? -1, assigneeIDs: $0.assigneeIDs) },
-                    taxCents: Money.cents(from: tax) ?? -1, tipCents: Money.cents(from: tip) ?? -1,
+                    taxCents: Money.cents(from: tax) ?? -1, tipCents: 0,
                     splitMethod: method, members: people, leaderID: store.accountID ?? "draft-owner",
-                    recurrence: recurrence, nextDueDate: recurrence == .none ? nil : nextDue)
+                    recurrence: recurrence, nextDueDate: recurrence == .none ? nil : nextDue, pricingVersion: 2, groupID: selectedGroupID)
     }
     private var receiptValid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !lines.isEmpty &&
         lines.allSatisfy { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (Money.cents(from: $0.amount) ?? 0) > 0 } &&
-        (Money.cents(from: tax) ?? -1) >= 0 && (Money.cents(from: tip) ?? -1) >= 0 && draft.totalCents > 0
+        (Money.cents(from: tax) ?? -1) >= 0 && draft.baseTotalCents > 0 && draft.baseTotalCents <= Bill.maximumCents
     }
-    private var totalMismatch: Bool { detectedTotal != nil && detectedTotal != draft.totalCents }
+    private var totalMismatch: Bool { detectedTotal != nil && detectedTotal != draft.baseTotalCents }
 
     var body: some View {
         NavigationStack {
@@ -87,7 +91,9 @@ struct NewBillView: View {
                         } catch { issue = error.localizedDescription }
                     }
                 }
-                .onChange(of: draft.totalCents) { _, _ in totalVerified = false }
+                .onChange(of: draft.baseTotalCents) { _, _ in totalVerified = false }
+                .onChange(of: category) { _, value in leaderTip = TipSelection(percent: value == .dining ? 20 : 0) }
+                .onChange(of: selectedGroupID) { _, _ in applySelectedGroup() }
         }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(store.busy || scanning)
     }
     private var receiptStep: some View {
@@ -133,21 +139,23 @@ struct NewBillView: View {
                     }
                     Button { lines.append(ReceiptLine()) } label: { Label("Add item", systemImage: "plus") }.font(.subheadline.bold())
                     HStack { Text("Tax"); Spacer(); TextField("0.00", text: $tax).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 100) }.font(.subheadline)
-                    HStack { Text("Tip"); Spacer(); TextField("0.00", text: $tip).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 100) }.font(.subheadline)
                     Divider()
-                    HStack { Text("Bill total").bold(); Spacer(); Text(Money.string(cents: draft.totalCents)).font(.title3.bold()).foregroundStyle(GP.mint) }
+                    HStack { Text("Before tips and fee").bold(); Spacer(); Text(Money.string(cents: draft.baseTotalCents)).font(.title3.bold()).foregroundStyle(GP.mint) }
+                }
+                if scannedTipCents > 0 {
+                    Text("The receipt includes \(Money.string(cents: scannedTipCents)) in tip. It isn’t added twice: each person sets their own tip before approving. For a tip already agreed with the restaurant, use exact tip amounts that add up to it.").font(.caption).foregroundStyle(GP.amber)
                 }
                 if totalMismatch {
                     Panel {
                         Label("Check the total", systemImage: "exclamationmark.triangle").foregroundStyle(GP.amber).font(.headline)
-                        Text("Receipt: \(Money.string(cents: detectedTotal ?? 0)). Your total: \(Money.string(cents: draft.totalCents)). Check for missed items or discounts before continuing.").font(.subheadline).foregroundStyle(GP.secondary)
+                        Text("Receipt: \(Money.string(cents: detectedTotal ?? 0)). Your total: \(Money.string(cents: draft.baseTotalCents)). Check for missed items or discounts before continuing.").font(.subheadline).foregroundStyle(GP.secondary)
                         Toggle("I verified the corrected total", isOn: $totalVerified).font(.subheadline)
                     }
                 }
                 if !rawText.isEmpty {
                     DisclosureGroup("Original receipt text") { Text(rawText).font(.caption.monospaced()).foregroundStyle(GP.secondary).textSelection(.enabled).padding(.top, 10) }.font(.subheadline).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
                 }
-                Text("Check prices, discounts, tax, and tip before continuing. Scans can occasionally miss a detail.").font(.caption).foregroundStyle(GP.secondary)
+                Text("Check prices, discounts, and tax before continuing. Everyone chooses their own tip when approving.").font(.caption).foregroundStyle(GP.secondary)
             }
         }
     }
@@ -162,28 +170,51 @@ struct NewBillView: View {
     }
     private var peopleStep: some View {
         VStack(alignment: .leading, spacing: 22) {
+            if !store.ownedGroups.isEmpty {
+                Panel {
+                    Picker("Saved group", selection: $selectedGroupID) {
+                        Text("One-time split").tag(nil as UUID?)
+                        ForEach(store.ownedGroups) { Text($0.name).tag(Optional($0.id)) }
+                    }.tint(GP.mint)
+                    Text("Group members accept one invitation, then future bills arrive automatically.").font(.caption).foregroundStyle(GP.secondary)
+                }
+            }
             Panel {
                 Eyebrow(text: "Your group")
                 ForEach(Array(members.indices), id: \.self) { index in
                     HStack {
                         Avatar(name: index == 0 ? store.name : members[index].name, index: index)
                         if index == 0 { Text(store.name == "You" ? "You" : "\(store.name) (you)").font(.subheadline); Spacer(); Text("Leader").font(.caption).foregroundStyle(GP.mint) }
-                        else {
+                        else if selectedGroupID != nil {
+                            Text(members[index].name).font(.subheadline)
+                            Spacer()
+                        } else {
                             TextField("Their name", text: $members[index].name).textContentType(.name).font(.subheadline)
                             Button { let id = members[index].id; members.remove(at: index); for i in lines.indices { lines[i].assigneeIDs.removeAll { $0 == id } } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Remove person")
                         }
                     }.padding(.vertical, 5)
                 }
-                Button { members.append(BillMember(name: "")) } label: { Label("Add a person", systemImage: "person.badge.plus") }.font(.subheadline.bold()).disabled(members.count >= 50)
-                Text("You’ll send invitations after creating the split.").font(.caption).foregroundStyle(GP.secondary)
+                if selectedGroupID == nil {
+                    Button { members.append(BillMember(name: "")) } label: { Label("Add a person", systemImage: "person.badge.plus") }.font(.subheadline.bold()).disabled(members.count >= 50)
+                    if !store.friends.isEmpty {
+                        Menu("Add a saved friend") {
+                            ForEach(store.friends.filter { friend in !members.contains(where: { $0.accountID == friend.id }) }) { friend in
+                                Button(friend.name) { addFriend(friend) }
+                            }
+                        }.font(.subheadline.bold()).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(members.count >= 50)
+                    }
+                    Text("You’ll send invitations after creating this one-time split. Choose a saved group to reuse an accepted invitation.").font(.caption).foregroundStyle(GP.secondary)
+                } else {
+                    Text("Everyone in this group can see its bills. Members who accepted the group invitation don’t need another link.").font(.caption).foregroundStyle(GP.secondary)
+                }
             }
             Panel {
                 Eyebrow(text: "How to split")
                 Picker("Split method", selection: $method) { ForEach(SplitMethod.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.menu).tint(GP.mint)
                 if method == .equal {
-                    Text("Share the full total equally, including tax and tip. Rounding is handled automatically.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("Split the subtotal equally. Tax and the 1% fee are added, then each person chooses their own tip.").font(.subheadline).foregroundStyle(GP.secondary)
                 } else if method == .custom {
-                    Text("Enter each person’s final amount, including tax and tip.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Assign each person’s food or item subtotal. Tax, personal tips, and the fee are added separately.").font(.caption).foregroundStyle(GP.secondary)
                     ForEach(Array(members.enumerated()), id: \.element.id) { index, member in
                         HStack {
                             Text(index == 0 ? store.name : member.name).font(.subheadline)
@@ -193,9 +224,9 @@ struct NewBillView: View {
                         }
                     }
                     let assigned = members.reduce(0) { $0 + min(Bill.maximumCents, max(0, Money.cents(from: customAmounts[$1.id] ?? "0") ?? 0)) }
-                    Text("\(Money.string(cents: draft.totalCents - assigned)) left to assign").font(.caption.bold()).foregroundStyle(assigned == draft.totalCents ? GP.mint : GP.amber)
+                    Text("\(Money.string(cents: draft.subtotalCents - assigned)) left to assign").font(.caption.bold()).foregroundStyle(assigned == draft.subtotalCents ? GP.mint : GP.amber)
                 } else {
-                    Text("Select who shares each item. Tax and tip follow each person’s portion of the subtotal.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Select who shares each item. Tax and the fee follow those portions; tips are personal.").font(.caption).foregroundStyle(GP.secondary)
                     ForEach($lines) { $line in
                         VStack(alignment: .leading, spacing: 12) {
                             HStack { Text(line.name).font(.subheadline.bold()); Spacer(); Text(Money.string(cents: Money.cents(from: line.amount) ?? 0)).font(.subheadline) }
@@ -245,6 +276,9 @@ struct NewBillView: View {
                 }
                 Text(Money.string(cents: draft.totalCents)).font(.system(size: reviewTotalSize, weight: .medium, design: .rounded)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.7).padding(.top, 4)
                 Text("\(method.rawValue) · \(recurrence.rawValue) · USD").font(.caption).foregroundStyle(GP.secondary)
+                Text("Includes estimated personal tips and the 1% fee. The total updates as everyone chooses their tip.").font(.caption).foregroundStyle(GP.secondary)
+                HStack { Text("Personal tips"); Spacer(); Text(Money.string(cents: draft.totalTipCents)) }.font(.subheadline)
+                HStack { Text("Group Pay fee · 1%"); Spacer(); Text(Money.string(cents: draft.feeCents)) }.font(.subheadline)
                 Divider()
                 ForEach(Array(draft.members.enumerated()), id: \.element.id) { index, member in
                     HStack {
@@ -255,12 +289,18 @@ struct NewBillView: View {
                     }
                 }
             }
+            if let member = draft.members.first {
+                Panel {
+                    PersonalTipEditor(foodCents: draft.foodShares[member.id] ?? 0, taxCents: draft.taxShares[member.id] ?? 0,
+                                      feeCents: draft.feeShares[member.id] ?? 0, selection: $leaderTip)
+                }
+            }
             Panel {
                 Text("What happens next").font(.headline)
                 VStack(alignment: .leading, spacing: 18) {
-                    nextStep("1", title: "Invite your group", detail: "Everyone receives their own portion.")
-                    nextStep("2", title: "Everyone approves", detail: "Each person reviews the bill before agreeing.")
-                    nextStep("3", title: "Create one test card", detail: "You confirm once the whole group is ready.")
+                    nextStep("1", title: selectedGroupID == nil ? "Invite your group" : "Share with your group", detail: "Everyone receives their own amount, including a tip they can adjust.")
+                    nextStep("2", title: "Everyone approves", detail: "Each person chooses their tip and approves their total.")
+                    nextStep("3", title: "Create one test card", detail: "You confirm once the whole group is ready. Only you receive the card.")
                 }.padding(.vertical, 4)
                 Divider()
                 Toggle("I reviewed the receipt and everyone’s portion", isOn: $reviewed).font(.subheadline).tint(GP.mint)
@@ -294,20 +334,37 @@ struct NewBillView: View {
             }
         }.padding(.horizontal, 22).padding(.vertical, 12).background(GP.background)
     }
+    private func applySelectedGroup() {
+        guard let id = selectedGroupID, let group = store.ownedGroups.first(where: { $0.id == id }) else {
+            members = [BillMember(name: store.name), BillMember(name: "")]
+            customAmounts = [:]
+            for i in lines.indices { lines[i].assigneeIDs = [] }
+            return
+        }
+        members = [BillMember(name: store.name, accountID: store.accountID)] + group.members.filter { $0.id != store.accountID }.map { BillMember(name: $0.name, accountID: $0.id) }
+        customAmounts = [:]
+        for i in lines.indices { lines[i].assigneeIDs = [] }
+    }
+    private func addFriend(_ friend: SavedFriend) {
+        let member = BillMember(name: friend.name, accountID: friend.id)
+        if let index = members.indices.dropFirst().first(where: { members[$0].name.isEmpty && members[$0].accountID == nil }) {
+            members[index] = member
+        } else { members.append(member) }
+    }
     private func decimal(_ cents: Int) -> String { String(format: "%d.%02d", cents / 100, cents % 100) }
     private func apply(_ receipt: ScannedReceipt) {
         title = receipt.merchant
         lines = receipt.items.map { ReceiptLine(name: $0.name, amount: decimal($0.amountCents)) }
         if lines.isEmpty, let total = receipt.totalCents { lines = [ReceiptLine(name: "Receipt total", amount: decimal(max(0, total - receipt.taxCents - receipt.tipCents)))] }
-        tax = decimal(receipt.taxCents); tip = decimal(receipt.tipCents)
-        rawText = receipt.rawText; detectedTotal = receipt.totalCents; totalVerified = false
+        tax = decimal(receipt.taxCents); scannedTipCents = receipt.tipCents
+        rawText = receipt.rawText; detectedTotal = receipt.totalCents.map { max(0, $0 - receipt.tipCents) }; totalVerified = false
     }
     private func sample(groceries: Bool) {
         category = groceries ? .groceries : .dining
         title = groceries ? "Sunday groceries" : "Dinner at Olive & Stone"
         let values: [(String, Int)] = groceries ? [("Sourdough loaf", 650), ("Avocados × 3", 525), ("Pasta & tomatoes", 1240), ("Coffee beans", 1600), ("Fresh berries", 799)] : [("Burrata to share", 1800), ("Rigatoni", 2600), ("Wild mushroom pizza", 2400), ("Roasted salmon", 3200), ("Sparkling water", 800)]
         lines = values.map { ReceiptLine(name: $0.0, amount: decimal($0.1)) }
-        tax = groceries ? "1.72" : "9.18"; tip = groceries ? "0.00" : "21.60"
+        tax = groceries ? "1.72" : "9.18"; leaderTip = TipSelection(percent: groceries ? 0 : 20); scannedTipCents = 0
         detectedTotal = nil; rawText = "Sample receipt · entered for demonstration"; totalVerified = false
     }
 }

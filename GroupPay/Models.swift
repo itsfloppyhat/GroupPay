@@ -44,6 +44,9 @@ struct BillMember: Codable, Identifiable, Sendable {
     var accountID: String? = nil
     var customCents: Int = 0
     var approved: Bool = false
+    // Missing fields preserve existing bills and use the bill's category default.
+    var tipPercent: Int? = nil
+    var tipOverrideCents: Int? = nil
 }
 
 struct VirtualCard: Codable, Identifiable, Sendable {
@@ -90,13 +93,16 @@ struct Bill: Codable, Identifiable, Sendable {
     var history: [PaymentRecord]
     var createdAt: Date
     var sandboxBackendID: String? = nil
+    var pricingVersion: Int? = nil
+    var groupID: UUID? = nil
 
     init(id: UUID = UUID(), title: String, category: BillCategory = .dining,
          items: [BillItem] = [], taxCents: Int = 0, tipCents: Int = 0,
          splitMethod: SplitMethod = .equal, members: [BillMember] = [],
          leaderID: String, status: BillStatus = .collecting, card: VirtualCard? = nil,
          recurrence: Recurrence = .none, nextDueDate: Date? = nil, cycle: Int = 1,
-         history: [PaymentRecord] = [], createdAt: Date = Date()) {
+         history: [PaymentRecord] = [], createdAt: Date = Date(),
+         pricingVersion: Int? = nil, groupID: UUID? = nil) {
         self.id = id
         self.title = title
         self.category = category
@@ -117,6 +123,8 @@ struct Bill: Codable, Identifiable, Sendable {
         self.cycle = cycle
         self.history = history
         self.createdAt = createdAt
+        self.pricingVersion = pricingVersion
+        self.groupID = groupID
     }
 
     // Guard all public arithmetic against malformed persisted or shared data.
@@ -132,13 +140,36 @@ struct Bill: Codable, Identifiable, Sendable {
     }
 
     var subtotalCents: Int { Self.checkedSum(items.map(\.amountCents)) ?? 0 }
-    var totalCents: Int { Self.checkedSum(items.map(\.amountCents) + [taxCents, tipCents]) ?? 0 }
+    var usesPersonalPricing: Bool { pricingVersion == 2 }
+    var defaultTipPercent: Int { category == .dining ? 20 : 0 }
+    var baseTotalCents: Int { Self.checkedSum(items.map(\.amountCents) + [taxCents]) ?? 0 }
+    var totalTipCents: Int { usesPersonalPricing ? personalPricing?.tipTotal ?? 0 : tipCents }
+    var feeCents: Int { usesPersonalPricing ? personalPricing?.feeTotal ?? 0 : 0 }
+    /// The service fee is collected separately; it is never loaded on a merchant card.
+    var cardAmountCents: Int {
+        usesPersonalPricing ? personalPricing?.cardTotal ?? 0 : Self.checkedSum(items.map(\.amountCents) + [taxCents, tipCents]) ?? 0
+    }
+    var totalCents: Int { usesPersonalPricing ? personalPricing?.total ?? 0 : cardAmountCents }
+    var foodShares: [UUID: Int] { allocatedFood ?? [:] }
+    var taxShares: [UUID: Int] {
+        guard let food = allocatedFood else { return [:] }
+        return Self.proportional(taxCents, weights: food, ids: members.map(\.id)) ?? [:]
+    }
+    var tipShares: [UUID: Int] {
+        if usesPersonalPricing { return personalPricing?.tips ?? [:] }
+        guard let food = allocatedFood else { return [:] }
+        return Self.proportional(tipCents, weights: food, ids: members.map(\.id)) ?? [:]
+    }
+    var feeShares: [UUID: Int] {
+        usesPersonalPricing ? personalPricing?.fees ?? [:] : Dictionary(uniqueKeysWithValues: Set(members.map(\.id)).map { ($0, 0) })
+    }
     var approvedCount: Int { members.filter { $0.approved && !($0.accountID ?? "").isEmpty }.count }
     var allApproved: Bool {
         validationMessage == nil && members.allSatisfy { $0.approved && !($0.accountID ?? "").isEmpty }
     }
 
     var validationMessage: String? {
+        if pricingVersion != nil && pricingVersion != 2 { return "Update Group Pay to open this bill's pricing." }
         if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Give this bill a name." }
         if leaderID.isEmpty { return "Connect your iCloud account before sending this bill." }
         if members.count < 2 { return "Add at least two people, including yourself." }
@@ -153,12 +184,16 @@ struct Bill: Codable, Identifiable, Sendable {
         if Set(items.map(\.id)).count != items.count { return "Each receipt item must have a unique identifier." }
         if items.contains(where: { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || $0.amountCents <= 0 }) { return "Each receipt item needs a name and an amount above zero." }
         if taxCents < 0 || tipCents < 0 { return "Tax and tip cannot be negative." }
-        guard let total = Self.checkedSum(items.map(\.amountCents) + [taxCents, tipCents]), total > 0 else {
+        if usesPersonalPricing && tipCents != 0 { return "Use each person's tip instead of a shared tip for this bill." }
+        guard let base = Self.checkedSum(items.map(\.amountCents) + [taxCents, tipCents]), base > 0 else {
             return "The total must be between $0.01 and $100,000.00."
         }
         if splitMethod == .custom {
-            guard let customTotal = Self.checkedSum(members.map(\.customCents)), customTotal == total else {
-                return "Custom amounts must add up to \(Money.string(cents: total)), including tax and tip."
+            let expected = usesPersonalPricing ? subtotalCents : base
+            guard let customTotal = Self.checkedSum(members.map(\.customCents)), customTotal == expected else {
+                return usesPersonalPricing
+                    ? "Custom food amounts must add up to \(Money.string(cents: expected)), before tax, personal tips, and the fee."
+                    : "Custom amounts must add up to \(Money.string(cents: expected)), including tax and tip."
             }
         }
         if splitMethod == .items {
@@ -170,10 +205,22 @@ struct Bill: Codable, Identifiable, Sendable {
                 }
             }
         }
+        if usesPersonalPricing {
+            if members.contains(where: { member in
+                if let percent = member.tipPercent, !(0...100).contains(percent) { return true }
+                if let amount = member.tipOverrideCents, !(0...Self.maximumCents).contains(amount) { return true }
+                return member.tipPercent != nil && member.tipOverrideCents != nil
+            }) { return "Choose a tip from 0% to 100%, or a valid tip amount, for each person." }
+            guard personalPricing != nil else { return "The total including tips and fees must be between $0.01 and $100,000.00." }
+        }
         return nil
     }
 
     var shares: [UUID: Int] {
+        usesPersonalPricing ? personalPricing?.charges ?? [:] : legacyShares
+    }
+
+    private var legacyShares: [UUID: Int] {
         guard !members.isEmpty, Set(members.map(\.id)).count == members.count,
               Self.checkedSum(items.map(\.amountCents) + [taxCents, tipCents]) != nil else { return [:] }
         let memberIDs = members.map(\.id)
@@ -210,6 +257,89 @@ struct Bill: Codable, Identifiable, Sendable {
         }
     }
 
+    private struct PersonalPricing {
+        let tips: [UUID: Int]
+        let fees: [UUID: Int]
+        let charges: [UUID: Int]
+        let tipTotal: Int
+        let feeTotal: Int
+        let cardTotal: Int
+        let total: Int
+    }
+
+    private var allocatedFood: [UUID: Int]? {
+        guard !members.isEmpty, members.count <= 50, Set(members.map(\.id)).count == members.count,
+              let subtotal = Self.checkedSum(items.map(\.amountCents)), subtotal > 0 else { return nil }
+        let ids = members.map(\.id)
+        switch splitMethod {
+        case .equal:
+            return Self.distribute(subtotal, among: ids)
+        case .custom:
+            guard let sum = Self.checkedSum(members.map(\.customCents)), sum > 0 else { return nil }
+            let custom = Dictionary(uniqueKeysWithValues: members.map { ($0.id, $0.customCents) })
+            if usesPersonalPricing { return sum == subtotal ? custom : nil }
+            return Self.proportional(subtotal, weights: custom, ids: ids)
+        case .items:
+            var result = Dictionary(uniqueKeysWithValues: ids.map { ($0, 0) })
+            for item in items {
+                let assigned = ids.filter { item.assigneeIDs.contains($0) }
+                guard !assigned.isEmpty, assigned.count == item.assigneeIDs.count else { return nil }
+                for (id, amount) in Self.distribute(item.amountCents, among: assigned) {
+                    result[id, default: 0] += amount
+                }
+            }
+            return result
+        }
+    }
+
+    private var personalPricing: PersonalPricing? {
+        guard usesPersonalPricing, tipCents == 0, let food = allocatedFood,
+              let base = Self.checkedSum(items.map(\.amountCents) + [taxCents]), base > 0,
+              let taxes = Self.proportional(taxCents, weights: food, ids: members.map(\.id)) else { return nil }
+        var tips: [UUID: Int] = [:]
+        var pretips: [UUID: Int] = [:]
+        for member in members {
+            let foodAmount = food[member.id] ?? 0
+            let percent = member.tipPercent ?? defaultTipPercent
+            guard (0...100).contains(percent), member.tipPercent == nil || member.tipOverrideCents == nil else { return nil }
+            let tip = member.tipOverrideCents ?? (foodAmount * percent + 50) / 100
+            guard (0...Self.maximumCents).contains(tip) else { return nil }
+            tips[member.id] = tip
+            pretips[member.id] = foodAmount + (taxes[member.id] ?? 0)
+        }
+        guard let tipTotal = Self.checkedSum(Array(tips.values)),
+              let cardTotal = Self.checkedSum([base, tipTotal]) else { return nil }
+        let feeTotal = (base + 50) / 100
+        guard let total = Self.checkedSum([cardTotal, feeTotal]),
+              let fees = Self.proportional(feeTotal, weights: pretips, ids: members.map(\.id)) else { return nil }
+        let charges = Dictionary(uniqueKeysWithValues: members.map { member in
+            let id = member.id
+            return (id, (pretips[id] ?? 0) + (tips[id] ?? 0) + (fees[id] ?? 0))
+        })
+        return PersonalPricing(tips: tips, fees: fees, charges: charges,
+                               tipTotal: tipTotal, feeTotal: feeTotal, cardTotal: cardTotal, total: total)
+    }
+
+    /// Allocate a shared amount by exact integer weights, preserving every cent.
+    /// Member order is the stable tie breaker and never depends on personal tips.
+    private static func proportional(_ cents: Int, weights: [UUID: Int], ids: [UUID]) -> [UUID: Int]? {
+        guard (0...maximumCents).contains(cents), !ids.isEmpty, Set(ids).count == ids.count,
+              let weightTotal = checkedSum(ids.map { weights[$0] ?? 0 }), weightTotal > 0 else { return nil }
+        var result: [UUID: Int] = [:]
+        var fractions: [(id: UUID, remainder: Int, position: Int)] = []
+        var allocated = 0
+        for (position, id) in ids.enumerated() {
+            let product = (weights[id] ?? 0) * cents
+            let amount = product / weightTotal
+            result[id] = amount
+            allocated += amount
+            fractions.append((id, product % weightTotal, position))
+        }
+        fractions.sort { $0.remainder == $1.remainder ? $0.position < $1.position : $0.remainder > $1.remainder }
+        for fraction in fractions.prefix(cents - allocated) { result[fraction.id, default: 0] += 1 }
+        return result
+    }
+
     private static func distribute(_ cents: Int, among ids: [UUID]) -> [UUID: Int] {
         guard !ids.isEmpty, cents >= 0 else { return [:] }
         return Dictionary(uniqueKeysWithValues: ids.enumerated().map { index, id in
@@ -237,13 +367,52 @@ struct Bill: Codable, Identifiable, Sendable {
         members[index].approved = true
     }
 
+    mutating func setPersonalTip(accountID: String, percent: Int) throws {
+        guard (0...100).contains(percent) else { throw BillError("Choose a tip from 0% to 100%.") }
+        try updatePersonalTip(accountID: accountID, percent: percent, amountCents: nil)
+    }
+
+    mutating func setPersonalTip(accountID: String, amountCents: Int) throws {
+        guard (0...Self.maximumCents).contains(amountCents) else { throw BillError("Enter a valid tip amount.") }
+        try updatePersonalTip(accountID: accountID, percent: nil, amountCents: amountCents)
+    }
+
+    private mutating func updatePersonalTip(accountID: String, percent: Int?, amountCents: Int?) throws {
+        try requireCollecting()
+        guard usesPersonalPricing else { throw BillError("Personal tips are available on new bills. This bill keeps its original agreed amounts.") }
+        guard !accountID.isEmpty, let index = members.firstIndex(where: { $0.accountID == accountID }) else {
+            throw BillError("Join this bill before choosing your tip.")
+        }
+        guard members[index].tipPercent != percent || members[index].tipOverrideCents != amountCents else { return }
+        var revised = self
+        revised.members[index].tipPercent = percent
+        revised.members[index].tipOverrideCents = amountCents
+        revised.members[index].approved = false
+        if let message = revised.validationMessage { throw BillError(message) }
+        self = revised
+    }
+
+    mutating func approve(accountID: String, tipPercent: Int) throws {
+        var revised = self
+        try revised.setPersonalTip(accountID: accountID, percent: tipPercent)
+        try revised.approve(accountID: accountID)
+        self = revised
+    }
+
+    mutating func approve(accountID: String, tipAmountCents: Int) throws {
+        var revised = self
+        try revised.setPersonalTip(accountID: accountID, amountCents: tipAmountCents)
+        try revised.approve(accountID: accountID)
+        self = revised
+    }
+
     mutating func confirm(accountID: String) throws {
         try requireLeader(accountID)
         try requireCollecting()
         if let validationMessage { throw BillError(validationMessage) }
         guard allApproved else { throw BillError("Everyone must join and approve their portion first.") }
         guard card == nil else { throw BillError("This bill already has a virtual card.") }
-        card = VirtualCard(lastFour: String(Int.random(in: 1000...9999)), loadedCents: totalCents, remainingCents: totalCents)
+        card = VirtualCard(lastFour: String(Int.random(in: 1000...9999)), loadedCents: cardAmountCents, remainingCents: cardAmountCents)
         status = .cardReady
     }
 
@@ -275,8 +444,8 @@ struct Bill: Codable, Identifiable, Sendable {
               incoming.lastFour.utf8.count == 4,
               incoming.lastFour.utf8.allSatisfy({ (48...57).contains($0) }),
               incoming.providerState == "ACTIVE",
-              incoming.loadedCents == totalCents,
-              incoming.remainingCents == totalCents else {
+              incoming.loadedCents == cardAmountCents,
+              incoming.remainingCents == cardAmountCents else {
             throw BillError("The sandbox card response is incomplete or does not match the approved bill total.")
         }
         if status == .cardReady {
@@ -298,7 +467,7 @@ struct Bill: Codable, Identifiable, Sendable {
 
     mutating func pay(accountID: String) throws {
         try requireLeader(accountID)
-        guard status == .cardReady, var card, card.remainingCents == totalCents, card.loadedCents == totalCents else {
+        guard status == .cardReady, var card, card.remainingCents == cardAmountCents, card.loadedCents == cardAmountCents else {
             throw BillError("Create a funded virtual card before simulating payment.")
         }
         guard card.provider == nil || card.provider == "mock" else {
@@ -356,9 +525,9 @@ struct Bill: Codable, Identifiable, Sendable {
             BillItem(name: "Grilled branzino", amountCents: 3600),
             BillItem(name: "Seasonal salad", amountCents: 1800),
             BillItem(name: "Sparkling water", amountCents: 600)
-        ], taxCents: 888, tipCents: 2000,
+        ], taxCents: 888,
              members: [BillMember(name: name, accountID: leaderID), BillMember(name: "Alex"), BillMember(name: "Sam")],
-             leaderID: leaderID)
+             leaderID: leaderID, pricingVersion: 2)
     }
 }
 
