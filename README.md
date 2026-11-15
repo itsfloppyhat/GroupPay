@@ -42,7 +42,7 @@ The project is generated with XcodeGen. After changing `project.yml`, run `xcode
 8. After the friend accepts the group invitation, start another split and choose the **Saved group**. All selected members are already assigned to their iCloud identities and future bills inherit group access. No new text/link is needed for each bill. Group membership is fixed for this version; create another group for a different set of people. Only the organizer creates bills under their group.
 9. For a locally paid recurring bill, start the next cycle and collect fresh approvals.
 
-**Both people must update to build 3 for standalone friend invitations.** New pricing uses `GroupPayBillV2` so old builds cannot approve a total without its tips/fee. Existing bills retain their original pricing and recovery keys. Leader cards previously embedded in legacy shared records are moved into unshared sibling records when the updated leader app fetches them.
+**Both people need build 3 or later for standalone friend invitations.** Build 4 fixes estimated-tax labels and subtotal recovery in scanned order summaries. New pricing uses `GroupPayBillV2` so old builds cannot approve a total without its tips/fee. Existing bills retain their original pricing and recovery keys. Leader cards previously embedded in legacy shared records are moved into unshared sibling records when the updated leader app fetches them.
 
 Development schema is created by the first successful device write. Before TestFlight/App Store builds, deploy `GroupPayBill`, `GroupPayBillV2`, `GroupPayGroup`, `GroupPayFriend`, `GroupPayFriendInvitation`, `GroupPayFriendReceipt`, and `GroupPayPrivateCard` (each `payload: Bytes`, `updatedBy: String`) to Production in CloudKit Console and validate production shares/subscriptions. All participants must use builds targeting the same CloudKit environment. Friend completion receipts remain private and prevent a previously accepted invitation from restoring a removed friend on refresh or another device.
 
@@ -91,7 +91,7 @@ The following are verified locally:
 - 49 friend-invitation, saved-group, notification-copy, and shared-card-redaction checks, including creating a group before any bill, retrying acceptance, rejecting another recipient, and preserving invitations through persistence; 484 Swift-to-Python pricing fixtures using the actual app request encoder.
 - Hosted pricing-v2 test: $10 food + $0.80 tax + $2.50 in personal tips funded exactly $13.30 on an active card; the separate fee stayed $0.11, for $13.41 total contributions. Provider GPA balance and exact retry were verified; changing the approved tip snapshot returned a conflict, and charging the fee on tips was rejected.
 - Four independent clients against real Firestore passed reservation, quota, replay, conflict, completion, and owner-fencing checks. Only isolated test records were created and removed.
-- Receipt parser fixtures and Swift 6 type-check.
+- 35 receipt-parser checks covering estimated sales tax, subtotal fallback for order summaries, savings/rewards exclusions, preserved mismatch review, restaurant/grocery itemization, and printed gratuity. Three additional native Vision checks passed on the locally supplied retail screenshot: $699.99 subtotal + $45.50 tax = $745.49. The screenshot is not stored in this repository.
 - Simulator UI flow: updated five-tab navigation, personal tip preview (20% to25%, amount updates), receipt/fee breakdown, dinner receipt sample, participant entry, and new pricing review. The two-person sample showed $139.95 contributions, $21.60 tips, $1.17 fee, and portions of $69.98/$69.97. No simulator approvals or invitations were sent.
 
 Run domain checks:
@@ -99,6 +99,13 @@ Run domain checks:
 ```sh
 xcrun swiftc -swift-version 6 GroupPay/Models.swift Tests/DomainChecks.swift -o /tmp/group-pay-domain-checks
 /tmp/group-pay-domain-checks
+```
+
+Run receipt checks on macOS using the same parser and Vision recognizer as the app:
+
+```sh
+xcrun swiftc -swift-version 6 GroupPay/ReceiptScanner.swift Tests/ReceiptChecks.swift -o /tmp/group-pay-receipt-checks
+/tmp/group-pay-receipt-checks
 ```
 
 Build for a device:

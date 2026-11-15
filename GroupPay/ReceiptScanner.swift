@@ -1,8 +1,10 @@
 import Foundation
+import Vision
+#if canImport(UIKit)
 import SwiftUI
 import UIKit
-import Vision
 import VisionKit
+#endif
 
 struct ScannedReceipt: Sendable {
     var merchant: String
@@ -94,6 +96,7 @@ enum ReceiptRecognizer {
         var tax = 0
         var tip = 0
         var total: Int?
+        var subtotal: Int?
 
         for line in cleaned {
             guard let (name, cents) = trailingPrice(in: line) else { continue }
@@ -103,17 +106,26 @@ enum ReceiptRecognizer {
 
             if matches(normalized, #"^(grand\s+total|total\s+due|amount\s+due|balance\s+due|total|amount)$"#) {
                 total = cents
-            } else if matches(normalized, #"^(sales\s+tax|tax|taxes|state\s+tax|local\s+tax|city\s+tax|county\s+tax)\b"#) {
+            } else if matches(normalized, #"^(sub\s*total|items?\s+subtotal|merchandise\s+subtotal)$"#) {
+                subtotal = cents
+            } else if matches(normalized, #"^(?:(?:est\.?|estimated)\s+)?(sales\s+tax|tax|taxes|state\s+tax|local\s+tax|city\s+tax|county\s+tax)\b"#) {
                 tax += cents
             } else if matches(normalized, #"^(tip|gratuity|service\s+charge)\b"#) {
                 tip += cents
-            } else if matches(normalized, #"\b(sub\s*total|total|balance|amount\s+paid|cash|change|credit|debit|visa|mastercard|amex|discover|tender|payment|savings|discount|coupon|suggested|suggestion|recommended|approval|authorization|account|rounding)\b"#) {
+            } else if matches(normalized, #"\b(sub\s*total|total|balance|amount\s+paid|cash|change|credit|debit|visa|mastercard|amex|discover|tender|payment|savings?|rewards?|discount|coupon|suggested|suggestion|recommended|approval|authorization|account|rounding)\b"#) {
                 continue
             } else if cents > 0, name.rangeOfCharacter(from: .letters) != nil {
                 items.append(ScannedReceiptItem(name: name, amountCents: cents))
             }
         }
 
+        // Online order summaries often put an item's price below its description.
+        // Use the explicitly labeled subtotal when no item rows were recovered;
+        // never guess which standalone amount belongs to a product. Preserve
+        // partial itemization so the existing total-mismatch review still runs.
+        if items.isEmpty, let subtotal, subtotal > 0 {
+            items = [ScannedReceiptItem(name: "Receipt subtotal", amountCents: subtotal)]
+        }
         guard !items.isEmpty || (total ?? 0) > 0 else { throw ReceiptScanError.noAmounts }
         let merchant = cleaned.first { line in
             line.rangeOfCharacter(from: .letters) != nil && trailingPrice(in: line) == nil
@@ -148,6 +160,7 @@ enum ReceiptRecognizer {
     }
 }
 
+#if canImport(UIKit)
 @MainActor
 struct ReceiptCamera: UIViewControllerRepresentable {
     var onScan: (Result<ScannedReceipt, Error>) -> Void
@@ -201,3 +214,4 @@ struct ReceiptCamera: UIViewControllerRepresentable {
         }
     }
 }
+#endif
