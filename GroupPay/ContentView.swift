@@ -4,6 +4,8 @@ struct ContentView: View {
     @State private var store = AppStore()
     @State private var tab = 0
     @State private var composing = false
+    @State private var showingSandbox = false
+    @State private var sandbox = SandboxCardService.shared
     @State private var route: [UUID] = []
     @Environment(\.scenePhase) private var phase
 
@@ -16,6 +18,7 @@ struct ContentView: View {
         }
         .tint(GP.mint).preferredColorScheme(.dark)
         .environment(store)
+        .sheet(isPresented: $showingSandbox) { SandboxConnectionView() }
         .sheet(isPresented: $composing) { NewBillView { id in tab = 0; route = [id] }.environment(store) }
         .sheet(isPresented: Binding(get: { store.sharingController != nil }, set: { if !$0 { store.sharingController = nil } })) {
             if let controller = store.sharingController { CloudShareSheet(controller: controller) }
@@ -183,9 +186,15 @@ struct ContentView: View {
                     Button(store.notificationsEnabled ? "Notifications enabled" : "Enable notifications") { Task { await store.enableNotifications() } }.foregroundStyle(GP.mint).disabled(!store.connected)
                 }
                 Panel {
+                    Label("Card issuing", systemImage: "creditcard.and.123").font(.headline)
+                    Text(sandbox.enabled ? "Marqeta Sandbox" : "Local simulation").font(.title3.bold()).foregroundStyle(GP.mint)
+                    Text("Connect the local sandbox backend to generate Marqeta test cards. Provider credentials stay on your Mac.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Button("Configure sandbox") { showingSandbox = true }.font(.subheadline.bold()).foregroundStyle(GP.mint)
+                }
+                Panel {
                     Eyebrow(text: "The prototype promise")
                     Text("Real people. Pretend money.").font(.title3.bold())
-                    Text("Invitations and approvals use iCloud. Balances, card issuance, and payments are simulated. A live Marqeta integration is a future backend step.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("Invitations and approvals use iCloud. Card creation can use Marqeta’s sandbox; all funds remain test funds. Real payments and merchant transactions are not enabled.").font(.subheadline).foregroundStyle(GP.secondary)
                 }
             }.padding(22)
         }.navigationTitle("Profile").navigationBarTitleDisplayMode(.inline).gpPage()
@@ -222,7 +231,7 @@ struct VirtualCardView: View {
             HStack {
                 Label("group pay", systemImage: "circle.hexagongrid.fill").font(.headline)
                 Spacer()
-                Text("DEMO CARD").font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(1.5)
+                Text(bill.card?.provider == "marqetaSandbox" ? "MARQETA SANDBOX" : "DEMO CARD").font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(1.5)
             }
             HStack {
                 Image(systemName: "simcard").font(.system(size: 32, weight: .thin)).rotationEffect(.degrees(90))
@@ -233,7 +242,7 @@ struct VirtualCardView: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(bill.title.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(1)
-                    Text(bill.status == .paid ? "Payment completed" : "Loaded for this bill").font(.caption).opacity(0.65)
+                    Text(bill.status == .paid ? "Payment completed" : bill.card?.provider == "marqetaSandbox" ? "Sandbox funds at issuance" : "Loaded for this bill").font(.caption).opacity(0.65)
                 }
                 Spacer()
                 Text(Money.string(cents: bill.card?.remainingCents ?? 0)).font(.system(.title2, design: .rounded, weight: .semibold))

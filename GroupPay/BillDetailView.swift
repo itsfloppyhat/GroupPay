@@ -84,7 +84,7 @@ struct BillDetailView: View {
                             }
                         }
                     }
-                    Text("All amounts and cards are simulated. No funds will leave anyone’s account.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Test money only. No real funds leave anyone’s account.").font(.caption).foregroundStyle(GP.secondary)
                 }.padding(22)
             } else {
                 EmptyPanel(symbol: "icloud", title: "This bill isn’t available.", subtitle: "Refresh your bills or ask the leader for a new invitation.").padding(22)
@@ -136,6 +136,21 @@ struct BillDetailView: View {
                 Label("All settled. Nice teamwork.", systemImage: "checkmark.seal.fill").font(.headline).foregroundStyle(GP.mint)
                 Text("Your simulated payment is complete. The card balance is now zero.").font(.subheadline).foregroundStyle(GP.secondary)
             }
+        } else if bill.status == .issuing {
+            Panel {
+                Label("Creating your sandbox card", systemImage: "creditcard.and.123").font(.headline)
+                Text("The approved split is locked while Marqeta creates and funds the test card. If the connection was interrupted, resume to retrieve the same card.").font(.subheadline).foregroundStyle(GP.secondary)
+                if isLeader(bill) {
+                    Button(store.busy ? "Working…" : "Resume card creation") { Task { await store.confirmCard(bill.id) } }
+                        .buttonStyle(PrimaryButton()).disabled(store.busy)
+                }
+            }
+        } else if bill.status == .cardReady && bill.card?.provider == "marqetaSandbox" {
+            Panel {
+                Label("Issued by Marqeta Sandbox", systemImage: "checkmark.icloud").font(.headline).foregroundStyle(GP.mint)
+                Text("An active virtual card and its test balance were created in Marqeta. Only masked card details are shared with the group.").font(.subheadline).foregroundStyle(GP.secondary)
+                Text("Sandbox transaction simulation is not connected yet. This card’s provider balance will not be changed by a local pretend payment.").font(.caption).foregroundStyle(GP.secondary)
+            }
         } else if bill.status == .cardReady {
             Panel {
                 Text("The group is good to go.").font(.headline)
@@ -154,8 +169,8 @@ struct BillDetailView: View {
                     }.buttonStyle(PrimaryButton()).disabled(store.busy)
                 }
                 if isLeader(bill) {
-                    Button { Task { await store.change(bill.id) { try $0.confirm(accountID: $1) } } } label: {
-                        Label(store.busy ? "Working…" : "Confirm & create demo card", systemImage: "creditcard")
+                    Button { Task { await store.confirmCard(bill.id) } } label: {
+                        Label(store.busy ? "Working…" : store.sandboxIssuingEnabled ? "Confirm & issue sandbox card" : "Confirm & create demo card", systemImage: "creditcard")
                     }.buttonStyle(PrimaryButton()).disabled(!bill.allApproved || store.busy)
                     if !bill.allApproved { Text("Everyone must join and approve before you can confirm.").font(.caption).foregroundStyle(GP.secondary) }
                 }

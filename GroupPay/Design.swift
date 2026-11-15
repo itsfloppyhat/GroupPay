@@ -45,7 +45,7 @@ struct Avatar: View {
 }
 struct StatusPill: View {
     var bill: Bill
-    var label: String { bill.status == .paid ? "Paid" : bill.status == .cardReady ? "Card ready" : bill.allApproved ? "Ready to confirm" : "Awaiting approval" }
+    var label: String { bill.status == .issuing ? "Creating sandbox card" : bill.status == .paid ? "Paid" : bill.status == .cardReady ? "Card ready" : bill.allApproved ? "Ready to confirm" : "Awaiting approval" }
     var body: some View {
         Text(label).font(.system(size: 10, weight: .semibold)).padding(.horizontal, 10).padding(.vertical, 6)
             .foregroundStyle(bill.status == .collecting && !bill.allApproved ? GP.amber : GP.mint)

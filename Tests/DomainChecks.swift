@@ -21,6 +21,100 @@ enum DomainChecks {
              leaderID: "leader")
     }
 
+    static func approvedBill(amount: Int = 100) throws -> Bill {
+        var bill = makeBill(amount: amount)
+        try bill.claim(memberID: bill.members[1].id, accountID: "alex")
+        try bill.claim(memberID: bill.members[2].id, accountID: "sam")
+        try bill.approve(accountID: "alex")
+        try bill.approve(accountID: "sam")
+        return bill
+    }
+
+    static func sandboxChecks() throws {
+        let legacyCard = VirtualCard(lastFour: "1234", loadedCents: 100, remainingCents: 100)
+        let legacyData = try JSONEncoder().encode(legacyCard)
+        let legacyJSON = try JSONSerialization.jsonObject(with: legacyData) as! [String: Any]
+        check(legacyJSON["provider"] == nil && legacyJSON["providerToken"] == nil && legacyJSON["providerState"] == nil, "Legacy JSON omits new provider fields")
+        let legacyDecoded = try JSONDecoder().decode(VirtualCard.self, from: legacyData)
+        check(legacyDecoded.provider == nil && legacyDecoded.providerToken == nil && legacyDecoded.providerState == nil, "Old card JSON decodes absent optional fields")
+
+        var pending = makeBill()
+        let legacyBillData = try JSONEncoder().encode(pending)
+        let legacyBillJSON = try JSONSerialization.jsonObject(with: legacyBillData) as! [String: Any]
+        check(legacyBillJSON["sandboxBackendID"] == nil, "Legacy bill JSON omits absent backend identity")
+        let legacyBill = try JSONDecoder().decode(Bill.self, from: legacyBillData)
+        check(legacyBill.sandboxBackendID == nil, "Old bill JSON decodes missing backend identity")
+        rejects("Cannot reserve before participants approve") { try pending.reserveSandboxCard(accountID: "leader") }
+        check(pending.status == .collecting && pending.card == nil, "Failed reservation leaves state unchanged")
+        var bill = try approvedBill()
+        rejects("Participant cannot reserve sandbox card") { try bill.reserveSandboxCard(accountID: "alex") }
+        let funded = VirtualCard(lastFour: "4321", loadedCents: 100, remainingCents: 100,
+                                 provider: "marqetaSandbox", providerToken: "sandbox-card-token", providerState: "ACTIVE")
+        rejects("Cannot attach before reservation") { try bill.attachSandboxCard(accountID: "leader", card: funded) }
+        try bill.reserveSandboxCard(accountID: "leader")
+        check(bill.status == .issuing && bill.card == nil, "Reservation locks cycle while provider request is in flight")
+        bill.sandboxBackendID = "server-fingerprint"
+        try bill.reserveSandboxCard(accountID: "leader")
+        check(bill.status == .issuing && bill.card == nil, "Reservation retry is idempotent")
+        check(bill.sandboxBackendID == "server-fingerprint", "Reservation preserves backend identity")
+        var invalidReservation = try approvedBill()
+        invalidReservation.title = ""
+        rejects("Invalid bill cannot reserve a card") { try invalidReservation.reserveSandboxCard(accountID: "leader") }
+        var revokedApproval = bill
+        revokedApproval.members[1].approved = false
+        rejects("Attachment rechecks current approvals") { try revokedApproval.attachSandboxCard(accountID: "leader", card: funded) }
+        rejects("Approvals cannot change while issuing") { try bill.approve(accountID: "alex") }
+        rejects("Claims cannot change while issuing") { try bill.claim(memberID: bill.members[1].id, accountID: "stranger") }
+        rejects("Mock confirmation cannot replace in-flight sandbox request") { try bill.confirm(accountID: "leader") }
+        rejects("Nonleader cannot attach card") { try bill.attachSandboxCard(accountID: "alex", card: funded) }
+
+        var badResponse = funded
+        badResponse.provider = nil
+        rejects("Response requires sandbox provider") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        for token in [nil, "", " ", String(repeating: "t", count: 65)] as [String?] {
+            badResponse = funded; badResponse.providerToken = token
+            rejects("Response requires bounded nonempty token") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        }
+        for digits in ["123", "12345", "12ab", "１２３４"] {
+            badResponse = funded; badResponse.lastFour = digits
+            rejects("Response requires four ASCII last digits") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        }
+        for state in [nil, "UNACTIVATED", "SUSPENDED", "active"] as [String?] {
+            badResponse = funded; badResponse.providerState = state
+            rejects("Response requires ACTIVE provider state") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        }
+        badResponse = funded; badResponse.loadedCents = 99
+        rejects("Response must fund exact approved bill total") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        badResponse = funded; badResponse.remainingCents = 99
+        rejects("Response must have unspent full balance") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        check(bill.status == .issuing && bill.card == nil, "Rejected responses leave reservation intact for retry")
+        try bill.attachSandboxCard(accountID: "leader", card: funded)
+        check(bill.status == .cardReady && bill.card?.providerToken == funded.providerToken, "Valid funded sandbox card attached")
+        var repeatResponse = funded
+        repeatResponse.id = UUID()
+        try bill.attachSandboxCard(accountID: "leader", card: repeatResponse)
+        check(bill.card?.id == funded.id, "Duplicate attachment preserves existing card identity")
+        badResponse = funded; badResponse.providerToken = "another-token"
+        rejects("Duplicate response cannot replace provider token") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        badResponse = funded; badResponse.providerState = "SUSPENDED"
+        rejects("Duplicate response cannot hide changed provider state") { try bill.attachSandboxCard(accountID: "leader", card: badResponse) }
+        rejects("Ready sandbox card cannot reserve again") { try bill.reserveSandboxCard(accountID: "leader") }
+        rejects("Sandbox balance cannot be consumed locally") { try bill.pay(accountID: "leader") }
+        check(bill.status == .cardReady && bill.card?.remainingCents == 100 && bill.history.isEmpty, "Rejected payment preserves actual provider balance and history")
+        let persisted = try JSONDecoder().decode(Bill.self, from: JSONEncoder().encode(bill))
+        check(persisted.card?.provider == "marqetaSandbox" && persisted.card?.providerState == "ACTIVE", "Provider metadata survives CloudKit JSON")
+
+        var mockBill = try approvedBill()
+        try mockBill.confirm(accountID: "leader")
+        mockBill.card?.provider = "mock"
+        try mockBill.pay(accountID: "leader")
+        check(mockBill.status == .paid && mockBill.card?.remainingCents == 0, "Explicit mock provider retains local simulation")
+        mockBill.recurrence = .monthly
+        mockBill.sandboxBackendID = "previous-server-fingerprint"
+        try mockBill.startNextCycle(accountID: "leader")
+        check(mockBill.sandboxBackendID == nil, "Fresh cycle clears previous backend reservation identity")
+    }
+
     static func main() throws {
         check(Money.cents(from: "12.34") == 1234, "Parse cents exactly")
         check(Money.cents(from: "$1,234.5") == 123450, "Parse dollar symbol and grouping")
@@ -133,6 +227,7 @@ enum DomainChecks {
         let encoded = try JSONEncoder().encode(Bill.demo(leaderID: "leader"))
         let decoded = try JSONDecoder().decode(Bill.self, from: encoded)
         check(decoded.totalCents == 12888 && decoded.approvedCount == 1, "Cloud JSON round trip")
+        try sandboxChecks()
         print("Passed \(count) domain checks.")
     }
 }

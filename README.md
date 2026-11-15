@@ -1,6 +1,6 @@
 # Group Pay
 
-A native SwiftUI group-payment prototype. Scan a receipt, split the total, invite your group, collect approvals, and create one simulated virtual card for the bill.
+A native SwiftUI group-payment prototype. Scan a receipt, split the total, invite your group, collect approvals, and create a virtual card using local simulation or Marqeta's sandbox. All funds are simulated.
 
 ## What works
 
@@ -10,6 +10,7 @@ A native SwiftUI group-payment prototype. Scan a receipt, split the total, invit
 - Separate iCloud identities and invite-only CloudKit sharing. Participants accept an Apple sharing invitation on their own device and claim their named portion.
 - Individual approvals; only the leader can confirm once everyone has joined and approved.
 - Simulated card creation for exactly the total, simulated payment, and payment history. Repeated confirmation/payment is rejected.
+- Optional Marqeta sandbox issuance through a Python backend on this Mac: creates an active virtual card and funds its isolated test account for the exact bill total. Credentials stay on the Mac; the app stores only its local connection token in Keychain. Interrupted requests resume the same card and funding order.
 - Weekly/monthly schedules. The leader starts each cycle; participant approvals reset and the prior card is discarded. No automatic funding. Authorized local reminders prompt the leader at the next due date.
 - Real CloudKit background-push registration plus local update banners, foreground refresh, and an inbox of pending approvals.
 - Private data stays in the owner's private CloudKit database and invitees' shared databases. No public database or public-read share links.
@@ -44,11 +45,23 @@ Development schema is created by the first successful device write. Before TestF
 
 Shared CloudKit database subscriptions deliver background change pushes. When iOS wakes the app, it fetches the changes and posts an authorized local banner. iOS may defer/coalesce delivery; force-quitting, disabling Background App Refresh, or network/power restrictions can prevent delivery. Notifications are not guaranteed immediate alerts. Opening the app always reconciles with CloudKit. Weekly/monthly due reminders are scheduled locally for the leader after notification permission is granted.
 
+## Marqeta sandbox on this Mac
+
+1. Create a sandbox in your [Marqeta developer account](https://app.marqeta.com/). Wait for its API credentials to become available.
+2. Run `python3 sandbox_backend/setup.py --credentials` from this repository. Enter the sandbox URL, application token, and admin access token in the local terminal. Token entry is hidden; `.env` is private and excluded from Git.
+3. Run `python3 sandbox_backend/server.py` and leave it running.
+4. Build and install the Debug app in the simulator with normal Xcode signing enabled (do not set `CODE_SIGNING_ALLOWED=NO`; the simulator needs its generated Keychain entitlements). Run `python3 sandbox_backend/configure_simulator.py --device <simulator-UDID>` to save its local connection token without copying secrets into chat. With exactly one running simulator, omit `--device`.
+5. In Group Pay, open **Profile → Configure sandbox → Save & check connection**. Choose **Issue a $10 test card**. This uses explicitly fictional participants, so it works without iCloud in the simulator. Retries recover the same request. Only the last four digits and initial test funding are shown.
+
+For a shared bill, sandbox mode replaces the leader's final demo-card confirmation with backend issuance. The bill locks while issuance is pending; **Resume card creation** retrieves the original result after an interruption. Provider cards cannot use the local simulated-payment button. Merchant transactions, live balance reconciliation, and completing recurring cycles with Marqeta cards are not implemented yet.
+
+The Mac service listens only at `127.0.0.1:8787`. Physical devices need a separately hosted authenticated HTTPS backend; they cannot access this service through their own localhost address. See [backend setup, API contract, and recovery details](sandbox_backend/README.md).
+
 ## Simulation boundary
 
-**No real money moves and no Marqeta endpoint is called.** The card has a demo identifier and last four digits, not usable payment credentials. It cannot pay a merchant or be added to Apple Wallet. There is no bank linking, real balance collection, funding, KYC, settlement, refund, or withdrawal flow.
+**No real money moves.** Local simulation calls no Marqeta endpoint. With sandbox mode enabled, the Mac calls only Marqeta's sandbox API and uses test funds. The app does not receive full card numbers or security codes and cannot pay a real merchant or add a card to Apple Wallet. There is no bank linking, real balance collection, KYC, settlement, refund, or withdrawal flow. Sandbox balances shown in Group Pay are snapshots at issuance, not live balances after external activity.
 
-CloudKit enforces invitation access, but invited users have read/write access to the shared bill. Leader roles, portion claims, and payment rules are enforced by this app, not a trusted financial server. A recipient can claim an unclaimed name; confirm the intended people when inviting. Do not use this architecture for real funds. A production Marqeta integration needs server-enforced participant authorization, immutable approval revisions, idempotent funding/issuing operations, secrets stored only on the backend, and reconciliation of provider callbacks.
+CloudKit enforces invitation access, but invited users have read/write access to the shared bill. Leader roles, portion claims, and payment rules are enforced by this app, not a trusted financial server. A recipient can claim an unclaimed name; confirm the intended people when inviting. The local sandbox backend checks exact amounts and approvals but trusts the app's identity assertions. Do not use this architecture for real funds. Production requires independently authenticated participants, server-enforced approval revisions and authorization, and reconciliation of provider callbacks.
 
 Published receipt/participant amounts are immutable in this prototype. To change an amount, create a new split. The leader can revoke sharing using Apple's sharing controls. Recurring cycles require the leader to start them; CloudKit does not run a scheduled payment job. OCR is conservative English/USD and excludes discounts from line items; the review step must correct totals before sharing.
 
@@ -56,8 +69,10 @@ Published receipt/participant amounts are immutable in this prototype. To change
 
 The following are verified locally:
 
-- Signed Debug device build with the iOS 27.2 SDK, iOS 27.2.1 deployment target, and iCloud/push entitlements.
-- 2,548 domain checks: cent conservation, proportional allocation, malformed amounts, identity/approval gates, duplicate payment prevention, recurring dates and resets, and JSON persistence.
+- Signed Debug device and simulator builds with the iOS 27.2 SDK, iOS 27.2.1 device deployment target, and iCloud/push entitlements.
+- 2,591 domain checks: cent conservation, proportional allocation, malformed amounts, identity/approval gates, sandbox reservation/attachment, duplicate payment prevention, recurring dates and resets, and backward-compatible JSON persistence.
+- 22 offline backend tests: authentication, sandbox endpoint restrictions, exact amounts, masked responses, durable retries, timeout recovery, and prevention of duplicate funding. These use a mock provider and do not prove live Marqeta access.
+- Live Marqeta sandbox test on November 14, 2026: the iPhone 18 Pro Max simulator issued an active virtual card with $10.00 in test funding. Replaying the same approved request returned the identical card without another provider create or funding attempt.
 - Receipt parser fixtures and Swift 6 type-check.
 - Simulator UI flow: overview, receipt sample/editing, people, invalid/valid custom allocations, and final review. A missing sheet environment discovered during this check was fixed and retested.
 
@@ -77,3 +92,5 @@ xcodebuild -project GroupPay.xcodeproj -scheme GroupPay -destination 'generic/pl
 The iOS 27.2 runtime is installed, and an iPhone 18 Pro Max simulator is configured. The app builds for this simulator using the simulator-specific iOS 27.2 deployment setting; physical-device builds still require iOS 27.2.1. Initial UI checks used iOS 26.5 with a temporary command-line override before the newer runtime was available. Simulator builds intentionally disable CloudKit connection and offer read-only preview and draft exploration. Add `--preview` as a launch argument to open the sample dashboard immediately.
 
 **Not yet verified:** camera capture on physical hardware; two-device invitation acceptance, approval sync, and notification delivery; production CloudKit schema deployment or TestFlight distribution. Those require the device/account setup above.
+
+After changing sandbox credentials or backend hosting, rerun the $10 connection test before testing shared bills.

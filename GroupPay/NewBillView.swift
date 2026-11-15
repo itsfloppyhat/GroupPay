@@ -238,7 +238,7 @@ struct NewBillView: View {
             }
             Panel {
                 Label("Here’s what happens next", systemImage: "arrow.triangle.branch").font(.headline)
-                Text("1. Invite your group through iCloud.\n2. Each person reviews and approves their part.\n3. You confirm and create one demo card.\n4. Simulate paying the full bill.").font(.subheadline).lineSpacing(8).foregroundStyle(GP.secondary)
+                Text(store.sandboxIssuingEnabled ? "1. Invite your group through iCloud.\n2. Each person reviews and approves their part.\n3. You confirm and issue a funded sandbox card.\n4. Inspect the test card in the app and Marqeta." : "1. Invite your group through iCloud.\n2. Each person reviews and approves their part.\n3. You confirm and create one demo card.\n4. Simulate paying the full bill.").font(.subheadline).lineSpacing(8).foregroundStyle(GP.secondary)
                 Toggle("I reviewed the receipt and everyone’s portion", isOn: $reviewed).font(.subheadline).tint(GP.mint)
             }
             if !store.connected { Text("Connect iCloud from Profile before creating this split. Sample receipts can be explored without an account.").font(.subheadline).foregroundStyle(GP.amber) }

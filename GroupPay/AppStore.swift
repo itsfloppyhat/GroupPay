@@ -2,6 +2,7 @@ import SwiftUI
 import Observation
 import CloudKit
 import UserNotifications
+import CryptoKit
 
 @MainActor @Observable
 final class AppStore {
@@ -144,6 +145,71 @@ final class AppStore {
             await cloud.syncRecurringReminders(bills)
         } catch { if token == session { self.error = error.localizedDescription } }
     }
+    var sandboxIssuingEnabled: Bool { SandboxCardService.shared.enabled }
+
+    func confirmCard(_ id: UUID) async {
+        guard let expected = bills.first(where: { $0.id == id }) else { return }
+        if !sandboxIssuingEnabled && expected.status != .issuing {
+            await change(id) { try $0.confirm(accountID: $1) }
+            // A previous sandbox reservation may have committed even if its
+            // reply was lost. Recover the latest state before another attempt.
+            if error != nil { await refresh() }
+            return
+        }
+        guard let accountID, connected else { error = "Connect iCloud before confirming a shared bill."; return }
+        guard !busy else { return }
+        let token = session
+        let backendID = SHA256.hash(data: Data(SandboxCardService.shared.baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
+        busy = true
+        defer { finish(token) }
+        do {
+            let reserved = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
+                guard bill.cycle == expected.cycle, bill.totalCents == expected.totalCents, bill.shares == expected.shares else {
+                    throw BillError("This bill changed. Refresh and review the latest amounts before creating a card.")
+                }
+                if bill.status == .cardReady, bill.card?.provider == "marqetaSandbox" {
+                    guard bill.leaderID == accountID else { throw BillError("Only the leader can recover this card.") }
+                    return // An earlier attachment committed but its reply was lost.
+                }
+                if let original = bill.sandboxBackendID, original != backendID {
+                    throw BillError("This bill started issuing through a different sandbox backend. Restore that connection to recover its original card.")
+                }
+                try bill.reserveSandboxCard(accountID: accountID)
+                bill.sandboxBackendID = backendID
+            }
+            guard token == session else { return }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == id }) { bills[index] = reserved }
+            if reserved.status == .cardReady { return }
+            // The durable backend keys issuance by bill + cycle. If saving the result
+            // to iCloud fails, repeating this request retrieves the same funded card.
+            let currentBackendID = SHA256.hash(data: Data(SandboxCardService.shared.baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
+            guard currentBackendID == backendID else {
+                throw BillError("The sandbox connection changed while reserving this bill. Restore the original connection, then resume card creation.")
+            }
+            let issued = try await SandboxCardService.shared.issue(for: reserved)
+            guard token == session else { return }
+            let card = VirtualCard(lastFour: issued.lastFour, loadedCents: issued.loadedCents,
+                                   remainingCents: issued.remainingCents,
+                                   createdAt: SandboxCardService.parseDate(issued.createdAt) ?? .now,
+                                   provider: issued.provider, providerToken: issued.cardToken,
+                                   providerState: issued.state)
+            let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
+                guard bill.cycle == reserved.cycle, bill.totalCents == reserved.totalCents, bill.shares == reserved.shares else {
+                    throw BillError("The bill changed while the sandbox card was being issued. Contact the leader before continuing.")
+                }
+                try bill.attachSandboxCard(accountID: accountID, card: card)
+            }
+            guard token == session else { return }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == id }) { bills[index] = updated }
+        } catch {
+            if token == session {
+                self.error = error.localizedDescription + " Refresh this bill, then use Resume card creation if issuance has started to recover the same card."
+            }
+        }
+    }
+
     func invite(_ bill: Bill) async {
         guard connected else { error = "Connect iCloud to invite people on their own devices."; return }
         let token = session

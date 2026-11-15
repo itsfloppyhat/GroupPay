@@ -19,6 +19,7 @@ enum SplitMethod: String, CaseIterable, Codable, Sendable, Identifiable {
 
 enum BillStatus: String, Codable, Sendable {
     case collecting = "Awaiting approval"
+    case issuing = "Creating sandbox card"
     case cardReady = "Card ready"
     case paid = "Paid"
 }
@@ -51,6 +52,9 @@ struct VirtualCard: Codable, Identifiable, Sendable {
     var loadedCents: Int
     var remainingCents: Int
     var createdAt: Date = Date()
+    var provider: String? = nil
+    var providerToken: String? = nil
+    var providerState: String? = nil
 }
 
 struct PaymentRecord: Codable, Identifiable, Sendable {
@@ -85,6 +89,7 @@ struct Bill: Codable, Identifiable, Sendable {
     var cycle: Int
     var history: [PaymentRecord]
     var createdAt: Date
+    var sandboxBackendID: String? = nil
 
     init(id: UUID = UUID(), title: String, category: BillCategory = .dining,
          items: [BillItem] = [], taxCents: Int = 0, tipCents: Int = 0,
@@ -242,10 +247,62 @@ struct Bill: Codable, Identifiable, Sendable {
         status = .cardReady
     }
 
+    /// Persist this reservation before requesting a provider card. Retrying an
+    /// interrupted request resumes the same bill cycle instead of making a mock card.
+    mutating func reserveSandboxCard(accountID: String) throws {
+        try requireLeader(accountID)
+        guard status == .collecting || status == .issuing else {
+            throw BillError("This bill cycle already has a card or has been paid.")
+        }
+        if let validationMessage { throw BillError(validationMessage) }
+        guard allApproved else { throw BillError("Everyone must join and approve their portion first.") }
+        guard card == nil else { throw BillError("This bill already has a virtual card.") }
+        status = .issuing
+    }
+
+    /// Accept only a fully funded active sandbox card. A repeated response for
+    /// the same card is harmless and preserves the originally stored card ID.
+    mutating func attachSandboxCard(accountID: String, card incoming: VirtualCard) throws {
+        try requireLeader(accountID)
+        guard status == .issuing || status == .cardReady else {
+            throw BillError("Reserve this bill for sandbox card creation first.")
+        }
+        if let validationMessage { throw BillError(validationMessage) }
+        guard allApproved else { throw BillError("Everyone must join and approve their portion first.") }
+        guard incoming.provider == "marqetaSandbox",
+              let token = incoming.providerToken, !token.isEmpty, token.count <= 64,
+              token == token.trimmingCharacters(in: .whitespacesAndNewlines),
+              incoming.lastFour.utf8.count == 4,
+              incoming.lastFour.utf8.allSatisfy({ (48...57).contains($0) }),
+              incoming.providerState == "ACTIVE",
+              incoming.loadedCents == totalCents,
+              incoming.remainingCents == totalCents else {
+            throw BillError("The sandbox card response is incomplete or does not match the approved bill total.")
+        }
+        if status == .cardReady {
+            guard let existing = card,
+                  existing.provider == incoming.provider,
+                  existing.providerToken == token,
+                  existing.providerState == incoming.providerState,
+                  existing.lastFour == incoming.lastFour,
+                  existing.loadedCents == incoming.loadedCents,
+                  existing.remainingCents == incoming.remainingCents else {
+                throw BillError("This bill already has a different card. Refresh before trying again.")
+            }
+            return
+        }
+        guard card == nil else { throw BillError("This bill already has a virtual card.") }
+        card = incoming
+        status = .cardReady
+    }
+
     mutating func pay(accountID: String) throws {
         try requireLeader(accountID)
         guard status == .cardReady, var card, card.remainingCents == totalCents, card.loadedCents == totalCents else {
             throw BillError("Create a funded virtual card before simulating payment.")
+        }
+        guard card.provider == nil || card.provider == "mock" else {
+            throw BillError("This card is managed by its provider. Sandbox transaction simulation is not available yet, so its balance cannot be spent locally.")
         }
         guard !history.contains(where: { $0.cycle == cycle }) else { throw BillError("This bill cycle has already been paid.") }
         card.remainingCents = 0
@@ -268,6 +325,7 @@ struct Bill: Codable, Identifiable, Sendable {
         cycle += 1
         status = .collecting
         card = nil
+        sandboxBackendID = nil
         for index in members.indices { members[index].approved = members[index].accountID == leaderID }
         // The selected next-due date now belongs to this unpaid cycle. Move it
         // forward only after payment, so starting a cycle cannot skip its date.

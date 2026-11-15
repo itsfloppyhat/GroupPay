@@ -35,6 +35,8 @@ targets:
       properties:
         CKSharingSupported: true
         UIBackgroundModes: [fetch, remote-notification]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
 schemes:
   GroupPay:
     build:
