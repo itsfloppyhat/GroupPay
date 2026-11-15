@@ -347,7 +347,7 @@ class SetupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        for name in ("server.py", "setup.py"):
+        for name in ("server.py", "storage.py", "setup.py"):
             shutil.copy(Path(__file__).parent / name, self.root / name)
 
     def tearDown(self):

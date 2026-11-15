@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var tab = 0
     @State private var composing = false
     @State private var showingSandbox = false
+    @State private var showingTeamAccess = false
     @State private var sandbox = SandboxCardService.shared
     @State private var route: [UUID] = []
     @Environment(\.scenePhase) private var phase
@@ -22,6 +23,7 @@ struct ContentView: View {
         .tint(GP.mint).preferredColorScheme(.dark)
         .environment(store)
         .sheet(isPresented: $showingSandbox) { SandboxConnectionView() }
+        .sheet(isPresented: $showingTeamAccess) { TeamAccessView() }
         .sheet(isPresented: $composing) { NewBillView { id in tab = 0; route = [id] }.environment(store) }
         .sheet(isPresented: Binding(get: { store.sharingController != nil }, set: { if !$0 { store.sharingController = nil } })) {
             if let controller = store.sharingController { CloudShareSheet(controller: controller) }
@@ -257,6 +259,15 @@ struct ContentView: View {
                             }
                         }
                         TestModeBadge(label: sandbox.enabled ? "Test cards enabled" : "Test mode")
+                        if SandboxCardService.hostedURL != nil {
+                            Button { showingTeamAccess = true } label: {
+                                HStack {
+                                    Text("Team access")
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }.frame(minHeight: 44)
+                            }.font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
+                        }
                     }
                 }
                 #if DEBUG

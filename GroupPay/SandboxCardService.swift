@@ -28,6 +28,7 @@ enum SandboxConnectionError: LocalizedError {
     case keychain(OSStatus), notConfigured, invalidBill, invalidResponse
     case unavailable, timedOut, unauthorized, conflict, unconfiguredBackend, rejected(Int), redirect
     case reconciliationPending, sandboxUnavailable, sandboxAccessDenied, missingLaunchSettings
+    case amountLimit, dailyLimitReached
 
     var errorDescription: String? {
         switch self {
@@ -36,11 +37,11 @@ enum SandboxConnectionError: LocalizedError {
         case .insecureDeviceURL:
             "This connection isn’t secure. Use the secure address supplied for this device."
         case .missingToken:
-            "Enter your Group Pay connection token to continue."
+            "Enter your Group Pay access code to continue."
         case .invalidToken:
-            "The connection token doesn’t look complete. Copy it again and try once more."
+            "The access code doesn’t look complete. Copy it again and try once more."
         case .tokenForNewServer:
-            "Enter the connection token again for this address."
+            "Enter your access code again for this connection."
         case .keychain(let status):
             if status == errSecMissingEntitlement {
                 "Your connection couldn’t be saved securely. Update or reinstall Group Pay, then try again."
@@ -50,7 +51,7 @@ enum SandboxConnectionError: LocalizedError {
         case .missingLaunchSettings:
             "Connection details are missing. Open Connection details to finish setup."
         case .notConfigured:
-            "Connect the card service in Advanced settings before creating a test card."
+            "Connect to your team before creating a test card."
         case .invalidBill:
             "Review the bill and collect everyone’s approval before creating a card."
         case .invalidResponse:
@@ -60,19 +61,23 @@ enum SandboxConnectionError: LocalizedError {
         case .timedOut:
             "Creating your card is taking longer than expected. Retry this same bill to check its status."
         case .unauthorized:
-            "The connection token wasn’t accepted. Check it in Connection details and try again."
+            "That access code wasn’t accepted. Ask your team organizer for the current code, then try again."
         case .conflict:
             "This bill’s card request needs to be reviewed. Keep this bill and check the card service before trying again."
         case .unconfiguredBackend:
-            "The card service isn’t ready yet. Finish connection setup and try again."
+            "The card service isn’t ready yet. Ask your team organizer to finish setup."
         case .reconciliationPending:
             "Your test card is still being prepared. Retry this same bill to check its status."
         case .sandboxUnavailable:
             "The test card service is temporarily unavailable. Retry this same bill in a moment."
         case .sandboxAccessDenied:
-            "The test card service couldn’t authorize this request. Check your service connection, then retry this same bill."
+            "The card service couldn’t authorize this request. Ask your team organizer to check the connection, then retry this same bill."
+        case .amountLimit:
+            "New test cards can cover up to $500. Choose a bill within that limit."
+        case .dailyLimitReached:
+            "Your team has reached today’s test card limit. It resets at midnight UTC. Existing card requests can still be checked."
         case .redirect:
-            "This connection address has changed. Check Connection details and try again."
+            "The connection address has changed. Check your team setup and try again."
         case .rejected:
             "We couldn’t create the card. Retry this same bill in a moment."
         }
@@ -88,19 +93,39 @@ final class SandboxCardService {
     private static let keychainAccount = "local-backend-token"
     private static let testBillKey = "GroupPay.sandbox.testBillID"
 
+    /// A public service address is safe to bundle. Credentials are entered by
+    /// the user and remain in this device's Keychain.
+    static var hostedURL: String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "GroupPayCardServiceURL") as? String,
+              let url = try? validatedURL(value), url.scheme?.lowercased() == "https" else { return nil }
+        return url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
     var enabled: Bool {
         didSet { UserDefaults.standard.set(enabled, forKey: Self.enabledKey) }
     }
     private(set) var baseURL: String
     private(set) var setupError: String?
+    private(set) var maxAmountCents: Int?
     private var hasToken: Bool
     private let session: URLSession
 
     var configured: Bool { hasToken && (try? Self.validatedURL(baseURL)) != nil }
 
+    /// Limit only fresh reservations; an existing issuance must remain recoverable.
+    var newCardLimitCents: Int? {
+        if let maxAmountCents { return maxAmountCents }
+        return baseURL == Self.hostedURL ? 50_000 : nil
+    }
+
     private init() {
-        baseURL = UserDefaults.standard.string(forKey: Self.endpointKey) ?? "http://127.0.0.1:8787"
-        let tokenExists = Self.readToken() != nil
+        // A bundled address never migrates an existing connection. Bills that
+        // are already issuing remain bound to their original service.
+        let savedURL = UserDefaults.standard.string(forKey: Self.endpointKey)
+        baseURL = savedURL ?? Self.hostedURL ?? "http://127.0.0.1:8787"
+        // Keychain items can survive reinstalling the app. Do not reuse an
+        // orphaned credential with a newly bundled destination.
+        let tokenExists = savedURL != nil && Self.readToken() != nil
         hasToken = tokenExists
         enabled = UserDefaults.standard.bool(forKey: Self.enabledKey) && tokenExists
         let configuration = URLSessionConfiguration.ephemeral
@@ -153,6 +178,7 @@ final class SandboxCardService {
         UserDefaults.standard.set(normalized, forKey: Self.endpointKey)
         hasToken = true
         setupError = nil
+        maxAmountCents = nil
         // Saving a new destination does not silently opt in to issuing provider cards.
         enabled = false
     }
@@ -163,15 +189,22 @@ final class SandboxCardService {
         hasToken = false
         enabled = false
         UserDefaults.standard.removeObject(forKey: Self.endpointKey)
-        baseURL = "http://127.0.0.1:8787"
+        baseURL = Self.hostedURL ?? "http://127.0.0.1:8787"
         setupError = nil
+        maxAmountCents = nil
     }
 
     func health() async throws -> Bool {
+        let checkedURL = baseURL
         let data = try await request(path: "v1/status", method: "GET")
-        struct Health: Decodable { let ready: Bool; let environment: String? }
+        struct Health: Decodable { let ready: Bool; let environment: String?; let maxAmountCents: Int? }
         guard let response = try? JSONDecoder().decode(Health.self, from: data),
               response.environment == nil || response.environment == "sandbox" else { throw SandboxConnectionError.invalidResponse }
+        if let limit = response.maxAmountCents, !(1...Bill.maximumCents).contains(limit) {
+            throw SandboxConnectionError.invalidResponse
+        }
+        guard baseURL == checkedURL else { throw SandboxConnectionError.notConfigured }
+        maxAmountCents = response.ready ? response.maxAmountCents : nil
         return response.ready
     }
 
@@ -246,9 +279,13 @@ final class SandboxCardService {
                 case fundingPending = "funding_pending"
                 case sandboxUnavailable = "sandbox_unavailable"
                 case sandboxAccessDenied = "sandbox_access_denied"
+                case amountLimit = "amount_limit"
+                case dailyLimitReached = "daily_limit_reached"
             }
             struct ErrorEnvelope: Decodable { let error: BackendCode }
             let code = (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.error
+            if http.statusCode == 422, code == .amountLimit { throw SandboxConnectionError.amountLimit }
+            if http.statusCode == 429, code == .dailyLimitReached { throw SandboxConnectionError.dailyLimitReached }
             if http.statusCode == 503 {
                 switch code {
                 case .notConfigured: throw SandboxConnectionError.unconfiguredBackend

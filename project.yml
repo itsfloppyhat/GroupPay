@@ -33,6 +33,7 @@ targets:
     info:
       path: GroupPay/Info.plist
       properties:
+        GroupPayCardServiceURL: https://group-pay-sandbox-d3md3qdhcq-uc.a.run.app
         CKSharingSupported: true
         UIBackgroundModes: [fetch, remote-notification]
         NSAppTransportSecurity:

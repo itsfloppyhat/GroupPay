@@ -1,0 +1,11 @@
+# Allowlist: even manual source submissions exclude secrets and local issuance journals.
+**
+!Dockerfile
+!requirements-cloud.txt
+!server.py
+!storage.py
+!cloud_app.py
+!cloud/
+!cloud/gunicorn.conf.py
+!cloudbuild.yaml
+!.dockerignore

@@ -10,11 +10,11 @@ A native SwiftUI group-payment prototype. Scan a receipt, split the total, invit
 - Separate iCloud identities and invite-only CloudKit sharing. Participants accept an Apple sharing invitation on their own device and claim their named portion.
 - Individual approvals; only the leader can confirm once everyone has joined and approved.
 - Simulated card creation for exactly the total, simulated payment, and payment history. Repeated confirmation/payment is rejected.
-- Optional Marqeta sandbox issuance through a Python backend on this Mac: creates an active virtual card and funds its isolated test account for the exact bill total. Credentials stay on the Mac; the app stores only its local connection token in Keychain. Interrupted requests resume the same card and funding order.
+- Optional Marqeta sandbox issuance through a Python backend on this Mac or Cloud Run: creates an active virtual card and funds its isolated test account for the exact bill total. Provider credentials stay on the backend; the app stores only its team access code in Keychain. Interrupted requests resume the same card and funding order.
 - Weekly/monthly schedules. The leader starts each cycle; participant approvals reset and the prior card is discarded. No automatic funding. Authorized local reminders prompt the leader at the next due date.
 - Real CloudKit background-push registration plus local update banners, foreground refresh, and an inbox of pending approvals.
 - Private data stays in the owner's private CloudKit database and invitees' shared databases. No public database or public-read share links.
-- Evergreen and mint Home, Inbox, Cards, Profile, creation, receipt, and bill-detail screens with native artwork, scalable typography, and concise customer-facing messages. An explicitly read-only preview is available without iCloud. Connection controls live under Advanced settings in Debug builds.
+- Evergreen and mint Home, Inbox, Cards, Profile, creation, receipt, and bill-detail screens with native artwork, scalable typography, and concise customer-facing messages. An explicitly read-only preview is available without iCloud. Team access is available in Profile; additional connection controls live under Advanced settings in Debug builds.
 
 ## Requirements and opening
 
@@ -55,13 +55,23 @@ Shared CloudKit database subscriptions deliver background change pushes. When iO
 
 For a shared bill, sandbox mode replaces the leader's final demo-card confirmation with backend issuance. The bill locks while issuance is pending; **Resume card creation** retrieves the original result after an interruption. Provider cards cannot use the local simulated-payment button. Merchant transactions, live balance reconciliation, and completing recurring cycles with Marqeta cards are not implemented yet.
 
-The Mac service listens only at `127.0.0.1:8787`. Physical devices need a separately hosted authenticated HTTPS backend; they cannot access this service through their own localhost address. See [backend setup, API contract, and recovery details](sandbox_backend/README.md).
+The Mac service listens only at `127.0.0.1:8787`. Physical devices use the hosted service below; they cannot access the Mac through their own localhost address. See [backend setup, API contract, and recovery details](sandbox_backend/README.md).
+
+## Hosted team beta
+
+The Cloud Run service lives in the dedicated Google Cloud project `group-pay-itsfloppyhat`, in `us-central1`. Its public HTTPS address is bundled as `GroupPayCardServiceURL`; no credentials are included in the app. Each tester opens **Profile → Team access**, enters the private Group Pay client code supplied by the organizer, and taps **Join**. iCloud invitation and approval steps remain the same.
+
+The organizer can display only that team code locally using `python3 sandbox_backend/setup.py --show-client-token`. Share it privately with trusted testers; never share either Marqeta token. Simulator pairing can use `python3 sandbox_backend/configure_simulator.py --hosted` followed by **Profile → Team access → Check connection**.
+
+The service scales to zero when idle and uses one small instance at most. Firestore retains issuance records and protects against duplicate funding across restarts and overlapping instances. Secret Manager holds the provider keys. New hosted cards are limited to $500 in test funds and the team has a combined limit of 100 new issuance intents per UTC day; exact retries do not consume another allowance. Existing migrated intents remain recoverable.
+
+A $5 monthly Cloud Run spend cap and $5 project-wide budget alerts are configured. The cap uses estimated gross Cloud Run charges, may have enforcement delay, and does not cap database, storage, builds, or other services. Light beta use is expected to cost roughly $0–$5/month, depending on traffic and free-tier availability. See [cloud setup, recovery, limits, and operating details](sandbox_backend/cloud/README.md).
 
 ## Simulation boundary
 
-**No real money moves.** Local simulation calls no Marqeta endpoint. With sandbox mode enabled, the Mac calls only Marqeta's sandbox API and uses test funds. The app does not receive full card numbers or security codes and cannot pay a real merchant or add a card to Apple Wallet. There is no bank linking, real balance collection, KYC, settlement, refund, or withdrawal flow. Sandbox balances shown in Group Pay are snapshots at issuance, not live balances after external activity.
+**No real money moves.** Local simulation calls no Marqeta endpoint. With sandbox mode enabled, the backend calls only Marqeta's sandbox API and uses test funds. The app does not receive full card numbers or security codes and cannot pay a real merchant or add a card to Apple Wallet. There is no bank linking, real balance collection, KYC, settlement, refund, or withdrawal flow. Sandbox balances shown in Group Pay are snapshots at issuance, not live balances after external activity.
 
-CloudKit enforces invitation access, but invited users have read/write access to the shared bill. Leader roles, portion claims, and payment rules are enforced by this app, not a trusted financial server. A recipient can claim an unclaimed name; confirm the intended people when inviting. The local sandbox backend checks exact amounts and approvals but trusts the app's identity assertions. Do not use this architecture for real funds. Production requires independently authenticated participants, server-enforced approval revisions and authorization, and reconciliation of provider callbacks.
+CloudKit enforces invitation access, but invited users have read/write access to the shared bill. Leader roles, portion claims, and payment rules are enforced by this app, not a trusted financial server. A recipient can claim an unclaimed name; confirm the intended people when inviting. Both backends check exact amounts and approvals but trust the app's identity assertions. The hosted shared access code is for a small trusted beta group and does not independently authenticate individual iCloud participants. Do not use this architecture for real funds. Production requires independently authenticated participants, server-enforced approval revisions and authorization, and reconciliation of provider callbacks.
 
 Published receipt/participant amounts are immutable in this prototype. To change an amount, create a new split. The leader can revoke sharing using Apple's sharing controls. Recurring cycles require the leader to start them; CloudKit does not run a scheduled payment job. OCR is conservative English/USD and excludes discounts from line items; the review step must correct totals before sharing.
 
@@ -69,10 +79,11 @@ Published receipt/participant amounts are immutable in this prototype. To change
 
 The following are verified locally:
 
-- Signed Debug device and simulator builds with the iOS 27.2 SDK, iOS 27.2.1 device deployment target, and iCloud/push entitlements.
+- Signed Debug simulator and Release device builds with the iOS 27.2 SDK, iOS 27.2.1 device deployment target, and iCloud/push entitlements. Hosted Team access was verified in the simulator using its saved Keychain code.
 - 2,591 domain checks: cent conservation, proportional allocation, malformed amounts, identity/approval gates, sandbox reservation/attachment, duplicate payment prevention, recurring dates and resets, and backward-compatible JSON persistence.
-- 22 offline backend tests: authentication, sandbox endpoint restrictions, exact amounts, masked responses, durable retries, timeout recovery, and prevention of duplicate funding. These use a mock provider and do not prove live Marqeta access.
-- Live Marqeta sandbox test on November 14, 2026: the iPhone 18 Pro Max simulator issued an active virtual card with $10.00 in test funding. Replaying the same approved request returned the identical card without another provider create or funding attempt.
+- 52 offline backend tests: local and hosted authentication, exact amounts, masked responses, deployment source/secret isolation, cross-process SQLite recovery, concurrent Firestore transaction behavior, quotas, legacy migration, timeout recovery, and prevention of duplicate funding. These use a mock provider.
+- Live Marqeta sandbox tests on November 14, 2026: local simulator issuance and hosted HTTPS issuance both created active cards with $10.00 in test funding. The cloud card’s available GPA balance was independently verified at $10.00; exact replay and durable lookup returned the same card. The migrated local card also remained retrievable.
+- Four independent clients against real Firestore passed reservation, quota, replay, conflict, completion, and owner-fencing checks. Only isolated test records were created and removed.
 - Receipt parser fixtures and Swift 6 type-check.
 - Simulator UI flow: Home, Inbox, Cards, Profile, advanced connection access, bill details, receipt samples/editing, participant entry, and final review. Invalid/valid custom allocations were checked during the original build. The refreshed UI was inspected on the iPhone 18 Pro Max simulator.
 

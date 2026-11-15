@@ -13,12 +13,13 @@ import json
 import os
 from pathlib import Path
 import re
-import sqlite3
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+from storage import SQLiteStore, StoreConflict, StoreError, StoreLimit
 
 ROOT = Path(__file__).resolve().parent
 MAX_CENTS = 10_000_000
@@ -190,19 +191,26 @@ def cents_of(value) -> int:
 
 
 class Issuer:
-    def __init__(self, config: Config, db_path: Path, provider=None):
+    def __init__(self, config: Config, db_path: Path | None = None, provider=None, *, store=None):
         self.config, self.provider = config, provider or Marqeta(config)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(db_path), check_same_thread=False)
-        os.chmod(db_path, 0o600)
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("CREATE TABLE IF NOT EXISTS intents (namespace TEXT, bill_id TEXT, cycle INTEGER, digest TEXT, result TEXT, PRIMARY KEY(namespace,bill_id,cycle))")
-        self.db.execute("CREATE TABLE IF NOT EXISTS attempts (namespace TEXT, resource TEXT, token TEXT, started INTEGER NOT NULL, PRIMARY KEY(namespace,resource,token))")
-        self.db.commit()
+        self.store = store if store is not None else SQLiteStore(db_path or ROOT / "data" / "issuance.sqlite3")
+        self.db = getattr(self.store, "db", None)  # Local diagnostics/backwards compatibility.
         self.lock = threading.Lock()
 
     def close(self):
-        self.db.close()
+        self.store.close()
+
+    def _store(self, method, *args):
+        try:
+            return getattr(self.store, method)(*args)
+        except StoreLimit:
+            raise APIError(429, "daily_limit_reached", "The shared daily test-card limit has been reached. Existing bills can still be recovered.") from None
+        except StoreConflict as error:
+            if error.code == "sandbox_changed":
+                raise APIError(409, "sandbox_changed", "This bill cycle belongs to another sandbox application. Restore its original sandbox settings to reconcile it.") from None
+            raise APIError(409, "bill_changed", "This bill cycle already has an issuance attempt for different approved amounts or members.") from None
+        except StoreError:
+            raise APIError(503, "storage_unavailable", "Durable card recovery is temporarily unavailable. Retry the same bill; no new create request is sent without a saved reservation.") from None
 
     def token(self, bill_id: str, cycle: int, kind: str) -> str:
         namespace = uuid.uuid5(uuid.NAMESPACE_URL, self.config.namespace)
@@ -232,21 +240,20 @@ class Issuer:
             return found
         if external:
             raise APIError(422, "missing_resource", "The configured sandbox resource token does not exist.")
-        attempted = self.db.execute("SELECT started FROM attempts WHERE namespace=? AND resource=? AND token=?",
-                                    (self.config.namespace, resource, token)).fetchone()
-        if attempted:
+        owner = self._store("claim_attempt", self.config.namespace, resource, token)
+        if owner is None:
+            # Another process may have completed between our first GET and claim.
+            recovered = self._get(resource, token)
+            if recovered is not None:
+                return recovered
             raise APIError(503, "reconciliation_pending", "A prior sandbox request may still be processing. Retry to reconcile it; no second funding request will be sent.")
-        self.db.execute("INSERT INTO attempts VALUES (?,?,?,1)", (self.config.namespace, resource, token))
-        self.db.commit()
         try:
             result = self.provider.request("POST", resource, {**body, "token": token})
         except ProviderError as error:
             # A definitive client-side rejection (except duplicates/timeouts) did
             # not create a resource; allow an explicit later retry after fixing setup.
             if error.status is not None and 400 <= error.status < 500 and error.status not in (408, 409, 422, 429):
-                self.db.execute("DELETE FROM attempts WHERE namespace=? AND resource=? AND token=?",
-                                (self.config.namespace, resource, token))
-                self.db.commit()
+                self._store("clear_attempt", self.config.namespace, resource, token, owner)
             # Duplicate or uncertain replies must be reconciled by token, never replayed.
             if error.status in (409, 422) or error.status is None or (error.status and error.status >= 500):
                 recovered = self._get(resource, token)
@@ -265,20 +272,9 @@ class Issuer:
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         bid, cycle, cents = request["billID"], request["cycle"], request["amountCents"]
         with self.lock:
-            other = self.db.execute("SELECT 1 FROM intents WHERE bill_id=? AND cycle=? AND namespace<>?",
-                                    (bid, cycle, self.config.namespace)).fetchone()
-            if other:
-                raise APIError(409, "sandbox_changed", "This bill cycle belongs to another sandbox application. Restore its original sandbox settings to reconcile it.")
-            existing = self.db.execute("SELECT digest,result FROM intents WHERE namespace=? AND bill_id=? AND cycle=?",
-                                       (self.config.namespace, bid, cycle)).fetchone()
-            if existing:
-                if not hmac.compare_digest(existing[0], digest):
-                    raise APIError(409, "bill_changed", "This bill cycle already has an issuance attempt for different approved amounts or members.")
-                if existing[1]:
-                    return json.loads(existing[1])
-            else:
-                self.db.execute("INSERT INTO intents VALUES (?,?,?,?,NULL)", (self.config.namespace, bid, cycle, digest))
-                self.db.commit()
+            existing = self._store("reserve_intent", self.config.namespace, bid, cycle, digest)
+            if existing.result is not None:
+                return existing.result
             try:
                 product_token = self.config.product_token or self.token("shared", 0, "product-v1")
                 funding_token = self.config.funding_token or self.token("shared", 0, "funding-v1")
@@ -332,10 +328,7 @@ class Issuer:
                 created = created_date.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
                 result = {"provider": "marqetaSandbox", "cardToken": card_token, "lastFour": last_four,
                           "state": "ACTIVE", "loadedCents": cents, "remainingCents": cents, "createdAt": created}
-                self.db.execute("UPDATE intents SET result=? WHERE namespace=? AND bill_id=? AND cycle=?",
-                                (json.dumps(result), self.config.namespace, bid, cycle))
-                self.db.commit()
-                return result
+                return self._store("complete_intent", self.config.namespace, bid, cycle, digest, result)
             except ProviderError as error:
                 if error.status in (401, 403):
                     raise APIError(502, "sandbox_access_denied", "Marqeta rejected sandbox access. Check your sandbox credentials and permissions.") from None
@@ -346,17 +339,14 @@ class Issuer:
             bid = str(uuid.UUID(bill_id)).upper()
         except ValueError:
             raise APIError(422, "invalid_request", "A valid billID is required.") from None
+        if type(cycle) is not int or not 1 <= cycle <= 1_000_000:
+            raise APIError(422, "invalid_request", "A valid bill cycle is required.")
         with self.lock:
-            other = self.db.execute("SELECT 1 FROM intents WHERE bill_id=? AND cycle=? AND namespace<>?",
-                                    (bid, cycle, self.config.namespace)).fetchone()
-            if other:
-                raise APIError(409, "sandbox_changed", "This bill cycle belongs to another sandbox application. Restore its original sandbox settings to reconcile it.")
-            row = self.db.execute("SELECT result FROM intents WHERE namespace=? AND bill_id=? AND cycle=?",
-                                  (self.config.namespace, bid, cycle)).fetchone()
-        if row is None:
+            intent = self._store("lookup_intent", self.config.namespace, bid, cycle)
+        if intent is None:
             raise APIError(404, "not_found", "No card issuance has been requested for this bill cycle.")
-        if row[0]:
-            return 200, json.loads(row[0])
+        if intent.result is not None:
+            return 200, intent.result
         return 202, {"status": "pending", "message": "Retry creation with the same approved bill to reconcile the original issuance."}
 
 
@@ -437,7 +427,7 @@ def main():
         config = Config.from_env(read_env())
         issuer = Issuer(config, ROOT / "data" / "issuance.sqlite3")
         server = HTTPServer(("127.0.0.1", 8787), handler_for(issuer))
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, StoreError) as error:
         print(str(error))
         raise SystemExit(1)
     print("Group Pay sandbox backend: http://127.0.0.1:8787")

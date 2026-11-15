@@ -13,6 +13,7 @@
 		38725A1AF59CF9E7368A909F /* GroupPayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614496DD3A8E59DD41B165AE /* GroupPayApp.swift */; };
 		6309B72E57DC433ED45613FA /* CloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */; };
 		645308E1E9AF77CA7B6FB508 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC21687612EC19E16494AFFB /* Design.swift */; };
+		71D78A8BB02500CEB041707D /* TeamAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12EFD039614A66880F2968A /* TeamAccessView.swift */; };
 		B449D8EE0929CD1C234D9D66 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FECC86FB5DA8F10FB920211 /* AppStore.swift */; };
 		C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */; };
 		C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9227BFB34C0358647FF51C /* SandboxCardService.swift */; };
@@ -31,6 +32,7 @@
 		B86C384643AB6F58170F1C47 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		C34A73F6BE77DB3373AF36C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CADA1A8A705908E8FCC57D99 /* NewBillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBillView.swift; sourceTree = "<group>"; };
+		E12EFD039614A66880F2968A /* TeamAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamAccessView.swift; sourceTree = "<group>"; };
 		E6820F79EAF5B9CE1785C884 /* GroupPay.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GroupPay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC21687612EC19E16494AFFB /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -67,6 +69,7 @@
 				CADA1A8A705908E8FCC57D99 /* NewBillView.swift */,
 				A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */,
 				4A9227BFB34C0358647FF51C /* SandboxCardService.swift */,
+				E12EFD039614A66880F2968A /* TeamAccessView.swift */,
 			);
 			path = GroupPay;
 			sourceTree = "<group>";
@@ -140,6 +143,7 @@
 				0BBD34B655D64D87165628EE /* NewBillView.swift in Sources */,
 				C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */,
 				C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */,
+				71D78A8BB02500CEB041707D /* TeamAccessView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

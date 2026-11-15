@@ -1,0 +1,9 @@
+# Allowlist: credentials, local databases, Git metadata and tests never enter the image context.
+**
+!Dockerfile
+!requirements-cloud.txt
+!server.py
+!storage.py
+!cloud_app.py
+!cloud/
+!cloud/gunicorn.conf.py

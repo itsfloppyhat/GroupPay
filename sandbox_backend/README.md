@@ -32,7 +32,7 @@ python3 sandbox_backend/setup.py --show-client-token
 
 Leave the server running while testing. Restart it after editing settings. It can start without provider credentials: connection checks show `ready: false` and card creation returns `503 not_configured`. A successful connection check confirms the local token and the presence of provider credentials; their validity is checked by the first card request.
 
-The server binds only IPv4 loopback. A physical iPhone cannot connect to this Mac service using its own localhost address. Remote-device hosting and production deployment require a separate authenticated backend design.
+The server binds only IPv4 loopback. A physical iPhone cannot connect to this Mac service using its own localhost address. For physical-device testing, use the [Cloud Run team backend](cloud/README.md). It adds authenticated HTTPS, durable Firestore recovery, private Secret Manager credentials, and beta usage limits. Real-money production remains outside this prototype.
 
 ## Sandbox card flow
 
@@ -104,9 +104,10 @@ This service implements issuance only. It does not expose card PAN/CVV, simulate
 ## Offline verification
 
 ```sh
-python3 -m unittest discover -s sandbox_backend -p 'test_*.py' -v
+cd sandbox_backend
+python3 -m unittest test_server test_storage -v
 ```
 
-The suite uses a mock Marqeta transport and temporary local HTTP servers. It tests cents and approval validation, endpoint restrictions, authentication, masked results, same-intent concurrency, restart recovery, accepted-but-timed-out creation/funding, no blind duplicate funding, partial failures, and changed snapshots/applications. It makes no requests to Marqeta.
+These standard-library suites use a mock Marqeta transport, temporary local HTTP servers, and isolated transaction-model storage. Install `requirements-cloud.txt` in a virtual environment to also run `test_cloud_app` as described in [cloud verification](cloud/README.md). It tests cents and approval validation, endpoint restrictions, authentication, masked results, same-intent concurrency, restart recovery, accepted-but-timed-out creation/funding, no blind duplicate funding, partial failures, and changed snapshots/applications. It makes no requests to Marqeta.
 
 A separate credentialed check on November 14, 2026 issued an active $10.00 virtual card from the iPhone 18 Pro Max simulator. Replaying the same request returned its saved funded result without another provider creation or funding attempt. Rerun that connection test when changing credentials or hosting.

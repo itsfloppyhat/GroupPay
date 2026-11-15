@@ -160,6 +160,7 @@ final class AppStore {
         guard !busy else { return }
         let token = session
         let backendID = SHA256.hash(data: Data(SandboxCardService.shared.baseURL.utf8)).map { String(format: "%02x", $0) }.joined()
+        let newCardLimitCents = SandboxCardService.shared.newCardLimitCents
         busy = true
         defer { finish(token) }
         do {
@@ -173,6 +174,9 @@ final class AppStore {
                 }
                 if let original = bill.sandboxBackendID, original != backendID {
                     throw BillError("This bill started with a different card connection. Restore the original connection in settings to finish creating its card.")
+                }
+                if bill.status == .collecting, let limit = newCardLimitCents, bill.totalCents > limit {
+                    throw BillError("New team test cards can hold up to \(Money.string(cents: limit)). This bill exceeds that limit.")
                 }
                 try bill.reserveSandboxCard(accountID: accountID)
                 bill.sandboxBackendID = backendID

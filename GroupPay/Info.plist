@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>CKSharingSupported</key>
 	<true/>
+	<key>GroupPayCardServiceURL</key>
+	<string>https://group-pay-sandbox-d3md3qdhcq-uc.a.run.app</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
