@@ -262,6 +262,81 @@ enum DomainChecks {
         check(roundTrip.groupID == recurring.groupID && roundTrip.pricingVersion == 2 && roundTrip.shares == recurring.shares, "Group and personal pricing survive JSON round trip")
     }
 
+    static func cancellationChecks() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var bill = makeBill(amount: 74_549)
+        bill.pricingVersion = 2
+        let original = try encoder.encode(bill)
+        check(bill.canCancel && bill.status.isActive, "A pending bill is active and cancellable")
+        for account in ["alex", "outsider", ""] {
+            rejects("Only the leader may cancel") { try bill.cancel(accountID: account) }
+            let unchanged = try encoder.encode(bill)
+            check(unchanged == original, "Rejected cancellation changes no receipt, approval, or amount")
+        }
+        try bill.cancel(accountID: "leader")
+        check(bill.status == .cancelled && !bill.status.isActive && !bill.canCancel,
+              "Cancelled bills leave the active list and cannot restart cancellation")
+        var normalized = bill
+        normalized.status = .collecting
+        let normalizedData = try encoder.encode(normalized)
+        check(normalizedData == original, "Cancellation preserves the receipt, tips, fees, approvals, and history")
+        let cancelledData = try encoder.encode(bill)
+        let restored = try JSONDecoder().decode(Bill.self, from: cancelledData)
+        check(restored.status == .cancelled && restored.shares == bill.shares, "Cancellation survives CloudKit JSON persistence")
+        try bill.cancel(accountID: "leader")
+        let retriedData = try encoder.encode(bill)
+        check(retriedData == cancelledData, "Leader cancellation retries are idempotent")
+        rejects("Participants cannot retry someone else's cancellation") { try bill.cancel(accountID: "alex") }
+        rejects("Cancelled bill cannot be joined") { try bill.claim(memberID: bill.members[1].id, accountID: "alex") }
+        rejects("Cancelled bill cannot be approved") { try bill.approve(accountID: "leader") }
+        rejects("Cancelled bill cannot change tips") { try bill.setPersonalTip(accountID: "leader", percent: 0) }
+        rejects("Cancelled bill cannot issue a mock card") { try bill.confirm(accountID: "leader") }
+        rejects("Cancelled bill cannot reserve a provider card") { try bill.reserveSandboxCard(accountID: "leader") }
+        let incoming = VirtualCard(lastFour: "4321", loadedCents: bill.cardAmountCents, remainingCents: bill.cardAmountCents,
+                                   provider: "marqetaSandbox", providerToken: "test-card", providerState: "ACTIVE")
+        rejects("A delayed provider response cannot attach to a cancelled bill") { try bill.attachSandboxCard(accountID: "leader", card: incoming) }
+        rejects("Cancelled bill cannot be paid") { try bill.pay(accountID: "leader") }
+        bill.recurrence = .monthly
+        rejects("Cancelled recurring bill cannot begin another cycle") { try bill.startNextCycle(accountID: "leader") }
+
+        for status: BillStatus in [.issuing, .cardReady, .paid] {
+            var protected = try approvedBill()
+            protected.status = status
+            let before = try encoder.encode(protected)
+            check(!protected.canCancel, "Closed or issuing bill does not offer cancellation")
+            rejects("Cancellation cannot hide a card reservation or paid cycle") { try protected.cancel(accountID: "leader") }
+            let after = try encoder.encode(protected)
+            check(before == after, "Rejected cancellation preserves the protected state")
+        }
+        var inconsistent = try approvedBill()
+        inconsistent.sandboxBackendID = "reserved-backend"
+        check(!inconsistent.canCancel, "A persisted backend reservation protects even inconsistent collecting state")
+        rejects("Cancellation cannot cross a backend reservation") { try inconsistent.cancel(accountID: "leader") }
+        inconsistent.sandboxBackendID = nil
+        inconsistent.card = incoming
+        check(!inconsistent.canCancel, "An attached card protects even inconsistent collecting state")
+        rejects("Cancellation cannot hide an attached card") { try inconsistent.cancel(accountID: "leader") }
+
+        var recurring = try approvedBill()
+        recurring.recurrence = .monthly
+        try recurring.confirm(accountID: "leader")
+        try recurring.pay(accountID: "leader")
+        try recurring.startNextCycle(accountID: "leader")
+        let previousHistory = try encoder.encode(recurring.history)
+        let dueDate = recurring.nextDueDate
+        try recurring.cancel(accountID: "leader")
+        let preservedHistory = try encoder.encode(recurring.history)
+        check(recurring.status == .cancelled && recurring.cycle == 2 && previousHistory == preservedHistory && recurring.nextDueDate == dueDate,
+              "Cancelling a later cycle preserves earlier payments and schedule history")
+        var invalidReceipt = makeBill(amount: 0)
+        check(invalidReceipt.validationMessage != nil, "Fixture has an incomplete receipt")
+        try invalidReceipt.cancel(accountID: "leader")
+        check(invalidReceipt.status == .cancelled, "An invalid receipt can still be cancelled without repairing its amounts")
+        check(BillStatus.collecting.isActive && BillStatus.issuing.isActive && BillStatus.cardReady.isActive && !BillStatus.paid.isActive,
+              "Active-state classification preserves open cards and excludes completed bills")
+    }
+
     static func main() throws {
         check(Money.cents(from: "12.34") == 1234, "Parse cents exactly")
         check(Money.cents(from: "$1,234.5") == 123450, "Parse dollar symbol and grouping")
@@ -376,6 +451,7 @@ enum DomainChecks {
         check(decoded.totalCents == 12998 && decoded.approvedCount == 1 && decoded.pricingVersion == 2, "Cloud JSON round trip")
         try sandboxChecks()
         try personalPricingChecks()
+        try cancellationChecks()
         print("Passed \(count) domain checks.")
     }
 }

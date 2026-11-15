@@ -22,6 +22,14 @@ enum BillStatus: String, Codable, Sendable {
     case issuing = "Creating sandbox card"
     case cardReady = "Card ready"
     case paid = "Paid"
+    case cancelled = "Cancelled"
+
+    var isActive: Bool {
+        switch self {
+        case .collecting, .issuing, .cardReady: true
+        case .paid, .cancelled: false
+        }
+    }
 }
 
 enum Recurrence: String, CaseIterable, Codable, Sendable, Identifiable {
@@ -140,6 +148,7 @@ struct Bill: Codable, Identifiable, Sendable {
     }
 
     var subtotalCents: Int { Self.checkedSum(items.map(\.amountCents)) ?? 0 }
+    var canCancel: Bool { status == .collecting && card == nil && sandboxBackendID == nil }
     var usesPersonalPricing: Bool { pricingVersion == 2 }
     var defaultTipPercent: Int { category == .dining ? 20 : 0 }
     var baseTotalCents: Int { Self.checkedSum(items.map(\.amountCents) + [taxCents]) ?? 0 }
@@ -404,6 +413,17 @@ struct Bill: Codable, Identifiable, Sendable {
         try revised.setPersonalTip(accountID: accountID, amountCents: tipAmountCents)
         try revised.approve(accountID: accountID)
         self = revised
+    }
+
+    /// Keep the shared record so everyone sees the terminal state. Cancellation
+    /// cannot race past a persisted provider reservation or hide a funded card.
+    mutating func cancel(accountID: String) throws {
+        try requireLeader(accountID)
+        if status == .cancelled { return }
+        guard canCancel else {
+            throw BillError("A split can be cancelled only before card creation begins.")
+        }
+        status = .cancelled
     }
 
     mutating func confirm(accountID: String) throws {

@@ -43,7 +43,9 @@ final class AppStore {
     var pendingBills: [Bill] { bills.filter { bill in
         bill.status == .collecting && bill.members.contains { $0.accountID == accountID && !$0.approved && accountID != nil }
     } }
-    var activeBills: [Bill] { bills.filter { $0.status != .paid } }
+    var activeBills: [Bill] { bills.filter { $0.status.isActive } }
+    var visibleBills: [Bill] { bills.filter { $0.status != .cancelled } }
+    var cancelledBills: [Bill] { bills.filter { $0.status == .cancelled } }
     var paidTotal: Int { bills.flatMap(\.history).reduce(0) { $0 + $1.amountCents } }
     var ownedGroups: [PaymentGroup] { groups.filter { $0.ownerID == accountID } }
     var friendSuggestions: [SavedFriend] {
@@ -191,6 +193,39 @@ final class AppStore {
             await cloud.syncRecurringReminders(bills)
         } catch { if token == session { self.error = error.localizedDescription } }
     }
+    func cancelSplit(_ id: UUID) async -> Bool {
+        guard let accountID, connected else {
+            error = "Connect iCloud to cancel a split."
+            return false
+        }
+        guard !busy, let expected = bills.first(where: { $0.id == id }) else { return false }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
+                guard bill.cycle == expected.cycle else {
+                    throw BillError("A new cycle has started. Refresh and review it before cancelling.")
+                }
+                // Check the fresh shared record: another device may already
+                // have reserved a card since this screen was opened.
+                try bill.cancel(accountID: accountID)
+            }
+            guard token == session else { return false }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == id }) { bills[index] = updated }
+            let identifiers = ["group-pay-bill-" + id.uuidString, "group-pay-recurring-" + id.uuidString]
+            let center = UNUserNotificationCenter.current()
+            center.removePendingNotificationRequests(withIdentifiers: identifiers)
+            center.removeDeliveredNotifications(withIdentifiers: identifiers)
+            await cloud.syncRecurringReminders(bills)
+            return true
+        } catch {
+            if token == session { self.error = error.localizedDescription }
+            return false
+        }
+    }
+
     var sandboxIssuingEnabled: Bool { SandboxCardService.shared.enabled }
 
     func confirmCard(_ id: UUID) async {

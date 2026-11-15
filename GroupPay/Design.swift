@@ -88,8 +88,19 @@ struct Avatar: View {
 
 struct StatusPill: View {
     var bill: Bill
-    var label: String { bill.status == .issuing ? "Creating card" : bill.status == .paid ? "Paid" : bill.status == .cardReady ? "Card ready" : bill.allApproved ? "Ready to confirm" : "Awaiting approval" }
-    private var tint: Color { bill.status == .collecting && !bill.allApproved ? GP.amber : GP.mint }
+    var label: String {
+        switch bill.status {
+        case .collecting: bill.allApproved ? "Ready to confirm" : "Awaiting approval"
+        case .issuing: "Creating card"
+        case .cardReady: "Card ready"
+        case .paid: "Paid"
+        case .cancelled: "Cancelled"
+        }
+    }
+    private var tint: Color {
+        if bill.status == .cancelled { return GP.secondary }
+        return bill.status == .collecting && !bill.allApproved ? GP.amber : GP.mint
+    }
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(tint).frame(width: 5, height: 5).accessibilityHidden(true)

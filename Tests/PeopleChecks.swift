@@ -123,6 +123,25 @@ struct PeopleChecks {
         bill.members[1].approved = false
         check(BillUpdateNotice.make(bill: bill, accountID: "guest")?.body.contains("Choose your name") == true,
               "Unclaimed one-off invitation does not invent a recipient amount")
+        bill.members[1].accountID = "guest"
+        try bill.cancel(accountID: "leader")
+        let cancellation = BillUpdateNotice.make(bill: bill, accountID: "guest")
+        check(cancellation?.title == "Team dinner · Cancelled", "A recipient sees that a shared split was cancelled")
+        check(cancellation?.body == "The leader cancelled this split. No approval or payment is needed.",
+              "Cancellation copy closes the payment request without asking for money")
+        check(BillUpdateNotice.make(bill: bill, accountID: "leader") == cancellation, "Leader can see cancellation status")
+        check(BillUpdateNotice.make(bill: bill, accountID: "") == nil && BillUpdateNotice.make(bill: bill, accountID: "outsider") == nil,
+              "Signed-out and unrelated users receive no claimed cancellation details")
+        let cancelledProjection = BillSharingProjection.redacted(bill)
+        let cancelledRoundTrip = try JSONDecoder().decode(Bill.self, from: JSONEncoder().encode(cancelledProjection))
+        check(cancelledRoundTrip.status == .cancelled && cancelledRoundTrip.shares == bill.shares,
+              "Shared projection and persistence retain cancellation and receipt accounting")
+        bill.members[1].accountID = nil
+        check(BillUpdateNotice.make(bill: bill, accountID: "guest") == cancellation,
+              "Someone with an unclaimed one-off invitation can still learn that it is cancelled")
+        bill.groupID = UUID()
+        check(BillUpdateNotice.make(bill: bill, accountID: "guest") == nil,
+              "A group outsider cannot receive cancellation details through an unclaimed place")
         print("Passed \(checks) people and notification checks.")
     }
 }

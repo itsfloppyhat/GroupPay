@@ -2,8 +2,10 @@ import SwiftUI
 
 struct BillDetailView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     let billID: UUID
     @State private var confirmingPayment = false
+    @State private var confirmingCancellation = false
     @State private var claiming: BillMember?
     @State private var tipSelection = TipSelection()
     @ScaledMetric(relativeTo: .largeTitle) private var totalSize = 52.0
@@ -41,6 +43,9 @@ struct BillDetailView: View {
                         Text(bill.title).font(.system(.title, design: .rounded, weight: .semibold)).tracking(-0.8)
                             .fixedSize(horizontal: false, vertical: true)
                         VStack(alignment: .leading, spacing: 9) {
+                            if bill.status == .cancelled {
+                                Text("Original split total").font(.caption).foregroundStyle(GP.secondary)
+                            }
                             Text(Money.string(cents: bill.totalCents))
                                 .font(.system(size: totalSize, weight: .medium, design: .rounded)).tracking(-2)
                                 .minimumScaleFactor(0.7).lineLimit(1)
@@ -48,14 +53,14 @@ struct BillDetailView: View {
                                 .font(.subheadline).foregroundStyle(GP.secondary)
                         }
                     }.padding(.vertical, 8)
-                    stages(bill)
-                    if isLeader(bill) && bill.card != nil { VirtualCardView(bill: bill) }
+                    if bill.status != .cancelled { stages(bill) }
+                    if bill.status != .cancelled && isLeader(bill) && bill.card != nil { VirtualCardView(bill: bill) }
                     actionPanel(bill)
                     Panel {
                         HStack {
                             Text("Your group").font(.headline)
                             Spacer()
-                            Text("\(bill.approvedCount) of \(bill.members.count) approved")
+                            Text(bill.status == .cancelled ? "Closed" : "\(bill.approvedCount) of \(bill.members.count) approved")
                                 .font(.caption).foregroundStyle(GP.secondary)
                         }
                         ForEach(Array(bill.members.enumerated()), id: \.element.id) { index, member in
@@ -63,12 +68,13 @@ struct BillDetailView: View {
                                 Avatar(name: member.name, index: index, size: 42)
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(member.name + (member.accountID == store.accountID && store.connected ? " (you)" : "")).font(.subheadline.bold())
-                                    Text(member.approved ? "Approved" : member.accountID == nil ? "Not joined yet" : "Awaiting approval")
-                                        .font(.caption).foregroundStyle(member.approved ? GP.mint : GP.secondary)
+                                    Text(bill.status == .cancelled ? "No payment due" : member.approved ? "Approved" : member.accountID == nil ? "Not joined yet" : "Awaiting approval")
+                                        .font(.caption).foregroundStyle(bill.status != .cancelled && member.approved ? GP.mint : GP.secondary)
                                 }
                                 Spacer()
                                 Text(Money.string(cents: bill.shares[member.id] ?? 0)).font(.system(.subheadline, design: .rounded, weight: .semibold))
-                                Image(systemName: member.approved ? "checkmark.circle.fill" : "circle.dotted").foregroundStyle(member.approved ? GP.mint : GP.secondary)
+                                Image(systemName: bill.status == .cancelled ? "minus.circle" : member.approved ? "checkmark.circle.fill" : "circle.dotted")
+                                    .foregroundStyle(bill.status != .cancelled && member.approved ? GP.mint : GP.secondary)
                             }.padding(.vertical, 6)
                             if index < bill.members.count - 1 { Divider().overlay(GP.secondary.opacity(0.08)) }
                         }
@@ -110,17 +116,19 @@ struct BillDetailView: View {
                             amountRow("Group Pay fee · 1%", bill.feeCents)
                         }
                         HStack {
-                            Text(bill.usesPersonalPricing ? "Total contributions" : "Total").bold()
+                            Text(bill.status == .cancelled ? "Original total" : bill.usesPersonalPricing ? "Total contributions" : "Total").bold()
                             Spacer()
                             Text(Money.string(cents: bill.totalCents)).bold()
                         }
                         if bill.usesPersonalPricing {
-                            amountRow("Amount for the card", bill.cardAmountCents)
-                            Text("The card covers the receipt and everyone’s tips. The Group Pay fee is separate and never includes tips.")
+                            amountRow(bill.status == .cancelled ? "Original card amount" : "Amount for the card", bill.cardAmountCents)
+                            Text(bill.status == .cancelled
+                                 ? "These amounts are kept for reference. This split was cancelled before a card was created."
+                                 : "The card covers the receipt and everyone’s tips. The Group Pay fee is separate and never includes tips.")
                                 .font(.caption).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    if bill.recurrence != .none {
+                    if bill.recurrence != .none && bill.status != .cancelled {
                         Panel {
                             Label("\(bill.recurrence.rawValue) split", systemImage: "repeat").font(.headline)
                             if let next = bill.nextDueDate { Text("Next due \(next.formatted(date: .abbreviated, time: .omitted))").font(.subheadline).foregroundStyle(GP.secondary) }
@@ -152,9 +160,26 @@ struct BillDetailView: View {
                 EmptyPanel(symbol: "icloud", title: "This bill isn’t available.", subtitle: "Refresh your bills or ask the leader for a new invitation.").padding(22)
             }
         }.navigationTitle("Split details").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar).gpPage()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let bill, canCancel(bill) {
+                        Button("Cancel split", role: .destructive) { confirmingCancellation = true }
+                            .font(.subheadline.weight(.medium)).disabled(store.busy)
+                            .accessibilityIdentifier("cancelSplit")
+                    }
+                }
+            }
             .refreshable { await store.refresh() }
             .onAppear { restorePersonalTip() }
             .onChange(of: personalTipStamp) { _, _ in restorePersonalTip() }
+            .confirmationDialog("Cancel this split?", isPresented: $confirmingCancellation, titleVisibility: .visible) {
+                Button("Cancel split", role: .destructive) {
+                    Task { if await store.cancelSplit(billID) { dismiss() } }
+                }
+                Button("Keep split", role: .cancel) { }
+            } message: {
+                Text("This removes the split from everyone’s active bills. No one can approve it or create a card. A cancelled record and any earlier payment history are kept.")
+            }
             .confirmationDialog("Make a test payment?", isPresented: $confirmingPayment, titleVisibility: .visible) {
                 Button("Pay \(Money.string(cents: bill?.totalCents ?? 0)) in test mode") {
                     Task { await store.change(billID) { try $0.pay(accountID: $1) } }
@@ -170,6 +195,9 @@ struct BillDetailView: View {
             } message: { Text("This will be your portion of the bill. You can review it before approving.") }
     }
     private func isLeader(_ bill: Bill) -> Bool { store.connected && bill.leaderID == store.accountID }
+    private func canCancel(_ bill: Bill) -> Bool {
+        isLeader(bill) && bill.canCancel
+    }
     private func amountRow(_ label: String, _ cents: Int) -> some View {
         HStack { Text(label); Spacer(); Text(Money.string(cents: cents)) }.font(.subheadline).foregroundStyle(GP.secondary)
     }
@@ -259,7 +287,13 @@ struct BillDetailView: View {
     }
 
     @ViewBuilder private func actionPanel(_ bill: Bill) -> some View {
-        if store.isPreview {
+        if bill.status == .cancelled {
+            Panel {
+                Label("Split cancelled", systemImage: "xmark.circle").font(.headline).foregroundStyle(GP.secondary)
+                Text("There’s nothing to approve or pay. The original split is kept here for reference.")
+                    .font(.subheadline).foregroundStyle(GP.secondary)
+            }
+        } else if store.isPreview {
             if bill.usesPersonalPricing, bill.status == .collecting, let member = bill.members.first {
                 personalPortion(bill, member: member, preview: true)
             } else {

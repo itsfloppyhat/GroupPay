@@ -130,6 +130,9 @@ struct BillUpdateNotice: Equatable, Sendable {
         case .paid:
             guard member != nil || isLeader else { return nil }
             return BillUpdateNotice(title: "\(bill.title) · All settled", body: "The test payment is complete. No real money moved.")
+        case .cancelled:
+            guard member != nil || isLeader || (bill.groupID == nil && bill.members.contains(where: { $0.accountID == nil })) else { return nil }
+            return BillUpdateNotice(title: "\(bill.title) · Cancelled", body: "The leader cancelled this split. No approval or payment is needed.")
         }
     }
 }

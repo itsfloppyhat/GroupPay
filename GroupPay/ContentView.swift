@@ -87,15 +87,15 @@ struct ContentView: View {
                     metric("Settled together", value: Money.string(cents: store.paidTotal), symbol: "checkmark.circle")
                 }.padding(.vertical, 3)
                 VStack(alignment: .leading, spacing: 14) {
-                    sectionHeading("Your splits", detail: store.bills.isEmpty ? nil : "\(store.bills.count)")
-                    if store.bills.isEmpty {
+                    sectionHeading("Your splits", detail: store.visibleBills.isEmpty ? nil : "\(store.visibleBills.count)")
+                    if store.visibleBills.isEmpty {
                         EmptyPanel(symbol: "receipt", title: "Good company. Easy splits.", subtitle: "Dinner out, groceries in, or the bills you share. Your first split starts here.")
                     }
-                    ForEach(store.bills) { bill in
+                    ForEach(store.visibleBills) { bill in
                         NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(.plain)
                     }
                 }
-                if store.bills.contains(where: { $0.recurrence != .none }) {
+                if store.visibleBills.contains(where: { $0.recurrence != .none }) {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "repeat").foregroundStyle(GP.mint)
                         VStack(alignment: .leading, spacing: 5) {
@@ -104,6 +104,7 @@ struct ContentView: View {
                         }
                     }.padding(.horizontal, 4)
                 }
+                cancelledSplits
             }.padding(.horizontal, 24).padding(.bottom, 30)
         }.gpPage().toolbar(.hidden, for: .navigationBar).refreshable { await store.refresh() }
     }
@@ -194,13 +195,14 @@ struct ContentView: View {
                         Button(store.notificationsDenied ? "Open notification settings" : "Turn on notifications") { Task { await store.enableNotifications() } }.buttonStyle(PrimaryButton())
                     }
                 }
-                let reviewedBills = store.bills.filter { bill in !store.pendingBills.contains(where: { $0.id == bill.id }) }
+                let reviewedBills = store.visibleBills.filter { bill in !store.pendingBills.contains(where: { $0.id == bill.id }) }
                 if !reviewedBills.isEmpty {
                     sectionHeading("With your group")
                     ForEach(reviewedBills) { bill in
                         NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(.plain)
                     }
                 }
+                cancelledSplits
             }.padding(24)
         }.navigationTitle("Inbox").navigationBarTitleDisplayMode(.large).gpPage().refreshable { await store.refresh() }
             .toolbar {
@@ -209,6 +211,22 @@ struct ContentView: View {
                         .accessibilityLabel("Refresh inbox").disabled(!store.connected || store.busy || store.refreshing)
                 }
             }
+    }
+
+    @ViewBuilder private var cancelledSplits: some View {
+        if !store.cancelledBills.isEmpty {
+            DisclosureGroup {
+                VStack(spacing: 12) {
+                    ForEach(store.cancelledBills) { bill in
+                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }
+                            .buttonStyle(.plain)
+                    }
+                }.padding(.top, 12)
+            } label: {
+                Label("Cancelled splits · \(store.cancelledBills.count)", systemImage: "archivebox")
+                    .font(.subheadline).foregroundStyle(GP.secondary)
+            }.tint(GP.secondary)
+        }
     }
 
     @ViewBuilder private var syncIssue: some View {
@@ -223,7 +241,7 @@ struct ContentView: View {
     }
 
     private var cards: some View {
-        let myCards = store.bills.filter { $0.card != nil && $0.leaderID == store.accountID && store.connected }
+        let myCards = store.visibleBills.filter { $0.card != nil && $0.leaderID == store.accountID && store.connected }
         return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
@@ -375,7 +393,8 @@ struct BillRow: View {
             HStack(spacing: -9) {
                 ForEach(Array(bill.members.prefix(3).enumerated()), id: \.element.id) { index, member in Avatar(name: member.name, index: index, size: 28) }
             }
-            Text("\(bill.approvedCount) of \(bill.members.count) approved").font(.caption2).foregroundStyle(GP.secondary)
+            Text(bill.status == .cancelled ? "No payment due" : "\(bill.approvedCount) of \(bill.members.count) approved")
+                .font(.caption2).foregroundStyle(GP.secondary)
         }
     }
 }
