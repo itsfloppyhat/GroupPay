@@ -20,7 +20,7 @@ A native SwiftUI group-payment prototype. Scan a receipt, split the total, invit
 Open `GroupPay.xcodeproj` and select the **GroupPay** scheme.
 
 - Stable Xcode 27.2, iOS 27.2 SDK, Swift 6 language mode.
-- Deployment target **iOS 27.2.1**; no beta APIs.
+- Physical-device deployment target **iOS 27.2.1**; simulator builds target **iOS 27.2** to match Apple’s installed runtime. No beta APIs.
 - Bundle ID: `com.itsfloppyhat.GroupPay`.
 - Developer team: Matthew Lucas (`FYWW2S89N3`). Change this in `project.yml` when using a different team.
 - CloudKit container: `iCloud.com.itsfloppyhat.GroupPay`.
@@ -74,6 +74,6 @@ Build for a device:
 xcodebuild -project GroupPay.xcodeproj -scheme GroupPay -destination 'generic/platform=iOS' -allowProvisioningUpdates build
 ```
 
-The local iOS 27.2 simulator downloads failed during setup. UI checks used the already-installed iOS 26.5 simulator with a **command-line-only deployment override**; the saved project remains iOS 27.2.1. Simulator builds intentionally disable CloudKit connection and offer read-only preview and draft exploration. Add `--preview` as a launch argument to open the sample dashboard immediately.
+The iOS 27.2 runtime is installed, and an iPhone 18 Pro Max simulator is configured. The app builds for this simulator using the simulator-specific iOS 27.2 deployment setting; physical-device builds still require iOS 27.2.1. Initial UI checks used iOS 26.5 with a temporary command-line override before the newer runtime was available. Simulator builds intentionally disable CloudKit connection and offer read-only preview and draft exploration. Add `--preview` as a launch argument to open the sample dashboard immediately.
 
 **Not yet verified:** camera capture on physical hardware; two-device invitation acceptance, approval sync, and notification delivery; production CloudKit schema deployment or TestFlight distribution. Those require the device/account setup above.

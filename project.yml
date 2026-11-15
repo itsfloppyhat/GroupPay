@@ -18,6 +18,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.itsfloppyhat.GroupPay
         PRODUCT_NAME: GroupPay
+        "IPHONEOS_DEPLOYMENT_TARGET[sdk=iphonesimulator*]": "27.2"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: Group Pay
