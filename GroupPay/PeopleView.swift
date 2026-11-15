@@ -2,16 +2,24 @@ import SwiftUI
 
 struct PeopleView: View {
     @Environment(AppStore.self) private var store
+    @State private var addingFriend = false
     @State private var creatingGroup = false
     @State private var removing: SavedFriend?
+    @State private var accepting: FriendInvitation?
+    @State private var cancelling: FriendInvitation?
+    @State private var invitationToShare: FriendInvitation?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 PageHeading(overline: "Your people", title: "Good company.\nOn repeat.")
+                Button { addingFriend = true } label: {
+                    Label("Add friend", systemImage: "person.badge.plus")
+                }.buttonStyle(PrimaryButton()).disabled(store.busy).accessibilityIdentifier("addFriend")
                 if !store.connected {
                     EmptyPanel(symbol: "person.2", title: "Keep your people close.", subtitle: "Connect iCloud in Profile to save friends and create reusable groups.")
                 } else {
+                    invitations
                     HStack {
                         Text("Your groups").font(.title3.weight(.semibold))
                         Spacer()
@@ -19,7 +27,7 @@ struct PeopleView: View {
                             .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint).disabled(store.friends.isEmpty || store.busy)
                     }
                     if store.groups.isEmpty {
-                        EmptyPanel(symbol: "person.3", title: "An invitation that lasts.", subtitle: "Save a friend below, then make a group. Once everyone accepts the group invitation, future bills arrive here without another text.")
+                        EmptyPanel(symbol: "person.3", title: "An invitation that lasts.", subtitle: "Add friends, then make a group. Once everyone accepts the group invitation, future bills arrive here without another text.")
                     }
                     ForEach(store.groups) { group in
                         Panel {
@@ -44,7 +52,7 @@ struct PeopleView: View {
                     }
                     Text("Saved friends").font(.title3.weight(.semibold))
                     if store.friends.isEmpty {
-                        Text("People who join your bills can be saved here for next time.").font(.subheadline).foregroundStyle(GP.secondary)
+                        Text("Add a friend now so they’re ready for your first split. You can also save people from past bills.").font(.subheadline).foregroundStyle(GP.secondary)
                     }
                     ForEach(store.friends) { friend in
                         Panel(padding: 16) {
@@ -75,6 +83,16 @@ struct PeopleView: View {
             }.padding(22)
         }.gpPage().navigationTitle("People").navigationBarTitleDisplayMode(.inline)
             .refreshable { await store.refresh() }
+            .sheet(isPresented: $addingFriend, onDismiss: {
+                guard let invitation = invitationToShare else { return }
+                invitationToShare = nil
+                Task { await store.invite(invitation) }
+            }) {
+                AddFriendView { invitationToShare = $0 }.environment(store)
+            }
+            .sheet(item: $accepting) { invitation in
+                AddFriendView(invitation: invitation).environment(store)
+            }
             .sheet(isPresented: $creatingGroup) { NewGroupView().environment(store) }
             .confirmationDialog("Remove saved friend?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                 if let friend = removing {
@@ -83,6 +101,109 @@ struct PeopleView: View {
                     }
                 }
             } message: { Text("Existing groups and shared bills stay available.") }
+            .confirmationDialog("Cancel friend invitation?", isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
+                if let invitation = cancelling {
+                    Button("Cancel invitation", role: .destructive) {
+                        Task { await store.removeFriendInvitation(invitation) }; cancelling = nil
+                    }
+                }
+            } message: { Text("This invitation will stop working. You can invite your friend again later.") }
+    }
+
+    @ViewBuilder private var invitations: some View {
+        if !store.friendInvitations.isEmpty {
+            Text("Friend invitations").font(.title3.weight(.semibold))
+            ForEach(store.friendInvitations) { invitation in
+                let outgoing = invitation.owner.id == store.accountID
+                Panel(padding: 18) {
+                    HStack(spacing: 12) {
+                        Avatar(name: outgoing ? invitation.recipientName : invitation.owner.name)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(outgoing ? invitation.recipientName : invitation.owner.name).font(.headline)
+                            Text(outgoing ? "Waiting for your friend to join" : "Wants to add you as a friend")
+                                .font(.caption).foregroundStyle(GP.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    if let issue = invitation.connectionIssue {
+                        Text(issue).font(.caption).foregroundStyle(GP.amber)
+                    }
+                    if outgoing {
+                        HStack {
+                            Button(invitation.connectionIssue == nil ? "Share invitation" : "Manage invitation") { Task { await store.invite(invitation) } }
+                                .foregroundStyle(GP.mint)
+                            Spacer()
+                            Button("Cancel", role: .destructive) { cancelling = invitation }
+                                .foregroundStyle(GP.secondary)
+                        }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).disabled(store.busy)
+                    } else {
+                        Button("Add friend") { accepting = invitation }
+                            .buttonStyle(PrimaryButton()).disabled(store.busy)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AddFriendView: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var invitation: FriendInvitation?
+    var onCreated: (FriendInvitation) -> Void = { _ in }
+    @State private var yourName = ""
+    @State private var friendName = ""
+    @State private var issue: String?
+
+    private var valid: Bool {
+        let name = yourName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let friend = friendName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.isEmpty && name.count <= 100 && (invitation != nil || (!friend.isEmpty && friend.count <= 100))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    PageHeading(overline: "Your people", title: invitation == nil ? "Friends first.\nSplits later." : "Keep in touch.")
+                    Text(invitation.map { "Add \($0.owner.name) to your saved friends. You’ll be saved in their list, too." }
+                         ?? "Send a private invitation. Once your friend joins, you’ll both have each other saved for future splits.")
+                        .font(.subheadline).foregroundStyle(GP.secondary)
+                    Panel {
+                        Text("Your name").font(.subheadline.weight(.semibold))
+                        TextField("How your friends know you", text: $yourName).textContentType(.name).gpField()
+                            .accessibilityIdentifier("friendInvitationYourName")
+                        if invitation == nil {
+                            Text("Friend’s name").font(.subheadline.weight(.semibold)).padding(.top, 8)
+                            TextField("Who would you like to add?", text: $friendName).textContentType(.name).gpField()
+                                .accessibilityIdentifier("friendInvitationRecipientName")
+                        }
+                    }
+                    Text("Adding a friend doesn’t share any bills. Choose who’s included each time you split or create a group.")
+                        .font(.caption).foregroundStyle(GP.secondary)
+                    if !store.connected {
+                        Label("Connect iCloud in Profile to add friends.", systemImage: "icloud")
+                            .font(.subheadline).foregroundStyle(GP.amber)
+                    }
+                    if let issue { Text(issue).font(.subheadline).foregroundStyle(GP.amber) }
+                    Button(store.busy ? "Saving…" : invitation == nil ? "Create invitation" : "Add friend") {
+                        Task {
+                            issue = nil
+                            if let invitation {
+                                if await store.acceptFriendInvitation(invitation, name: yourName) { dismiss() }
+                            } else if let created = await store.createFriendInvitation(name: yourName, friendName: friendName) {
+                                onCreated(created)
+                                dismiss()
+                            }
+                            if let error = store.error { issue = error; store.error = nil }
+                        }
+                    }.buttonStyle(PrimaryButton()).disabled(!valid || !store.connected || store.busy)
+                        .accessibilityIdentifier("saveFriendInvitation")
+                }.padding(22)
+            }.gpPage().navigationTitle(invitation == nil ? "Add friend" : "Friend invitation").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(store.busy) } }
+                .onAppear { yourName = store.name == "You" ? "" : store.name }
+        }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(store.busy)
     }
 }
 

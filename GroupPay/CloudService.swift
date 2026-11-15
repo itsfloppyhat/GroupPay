@@ -23,10 +23,11 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     private let zoneID = CKRecordZone.ID(zoneName: "GroupPay", ownerName: CKCurrentUserDefaultName)
     private var locations: [UUID: Location] = [:]
     private var groupLocations: [UUID: Location] = [:]
+    private var friendInvitationLocations: [UUID: Location] = [:]
     private var sharingTitle = "Group Pay"
     private static let billTypes: Set<String> = ["GroupPayBill", "GroupPayBillV2"]
-    private static let synchronizedTypes: Set<String> = ["GroupPayBill", "GroupPayBillV2", "GroupPayGroup", "GroupPayFriend"]
-    private static let knownTypes: Set<String> = ["GroupPayBill", "GroupPayBillV2", "GroupPayGroup", "GroupPayFriend", "GroupPayPrivateCard"]
+    private static let synchronizedTypes: Set<String> = ["GroupPayBill", "GroupPayBillV2", "GroupPayGroup", "GroupPayFriend", "GroupPayFriendInvitation"]
+    private static let knownTypes: Set<String> = ["GroupPayBill", "GroupPayBillV2", "GroupPayGroup", "GroupPayFriend", "GroupPayPrivateCard", "GroupPayFriendInvitation", "GroupPayFriendReceipt"]
     private var currentUserID: String?
     private var accountEpoch = 0
     private var recurringReminderTask: Task<Void, Never>?
@@ -87,6 +88,7 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             if currentUserID != id {
                 locations.removeAll()
                 groupLocations.removeAll()
+                friendInvitationLocations.removeAll()
                 zoneReady = false
             }
             currentUserID = id
@@ -105,6 +107,7 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         currentUserID = nil
         locations.removeAll()
         groupLocations.removeAll()
+        friendInvitationLocations.removeAll()
         zoneReady = false
         // Serialize cleanup with any notification writes already in flight. A
         // subsequent account's scheduling waits for this cleanup to finish.
@@ -133,8 +136,13 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         do {
             let identity = try await account().id
             let epoch = accountEpoch
-            let loaded = try await loadRecords()
+            var loaded = try await loadRecords()
             try validateSession(epoch, expectedID: identity)
+            let connections = try await reconcileFriendInvitations(loaded, identity: identity, epoch: epoch)
+            for record in connections.saved {
+                loaded.removeAll { $0.1 == .private && $0.0.recordID == record.recordID }
+                loaded.append((record, .private))
+            }
             var result: [Bill] = []
             var nextLocations: [UUID: Location] = [:]
             for (record, scope) in loaded where Self.billTypes.contains(record.recordType) {
@@ -165,7 +173,8 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             }
             groupLocations = nextGroups
             remember(loaded)
-            return CloudWorkspace(bills: result, friends: friends, groups: groups.sorted { $0.createdAt > $1.createdAt })
+            return CloudWorkspace(bills: result, friends: friends, groups: groups.sorted { $0.createdAt > $1.createdAt },
+                                  friendInvitations: connections.pending.sorted { $0.createdAt > $1.createdAt })
         } catch { throw readable(error) }
     }
 
@@ -230,6 +239,199 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             try validateSession(epoch)
         } catch let error as CKError where error.code == .unknownItem { return }
         catch { throw readable(error) }
+    }
+
+    func createFriendInvitation(ownerName: String, recipientName: String) async throws -> FriendInvitation {
+        do {
+            let identity = try await account().id
+            let epoch = accountEpoch
+            let invitation = FriendInvitation(owner: SavedFriend(id: identity, name: ownerName.trimmingCharacters(in: .whitespacesAndNewlines)),
+                                              recipientName: recipientName.trimmingCharacters(in: .whitespacesAndNewlines))
+            if let message = invitation.validationMessage { throw Failure.unavailable(message) }
+            try await ensureZone()
+            try validateSession(epoch, expectedID: identity)
+            let record = CKRecord(recordType: "GroupPayFriendInvitation", recordID: friendInvitationRecordID(invitation.id))
+            try encodePayload(invitation, into: record)
+            let saved = try await save(record, in: container.privateCloudDatabase)
+            try validateSession(epoch, expectedID: identity)
+            friendInvitationLocations[invitation.id] = Location(recordID: saved.recordID, scope: .private)
+            return invitation
+        } catch { throw readable(error) }
+    }
+
+    func sharingController(for invitation: FriendInvitation) async throws -> UICloudSharingController {
+        do {
+            let identity = try await account().id
+            let epoch = accountEpoch
+            guard invitation.owner.id == identity else { throw Failure.ownerOnly }
+            let root = try await container.privateCloudDatabase.record(for: friendInvitationRecordID(invitation.id))
+            try validateSession(epoch, expectedID: identity)
+            let latest = try decodeFriendInvitation(root)
+            guard latest.owner.id == identity else { throw Failure.ownerOnly }
+            return try await sharingController(root: root, title: "Connect with \(latest.owner.name) on Group Pay", epoch: epoch, identity: identity)
+        } catch { throw readable(error) }
+    }
+
+    func acceptFriendInvitation(_ invitation: FriendInvitation, name: String) async throws {
+        do {
+            let identity = try await account().id
+            let epoch = accountEpoch
+            if friendInvitationLocations[invitation.id] == nil { _ = try await fetchWorkspace() }
+            try validateSession(epoch, expectedID: identity)
+            guard let location = friendInvitationLocations[invitation.id], location.scope == .shared else {
+                throw Failure.unavailable("Accept the private invitation from your friend, then open People to connect.")
+            }
+            let database = container.sharedCloudDatabase
+            let record = try await database.record(for: location.recordID)
+            try validateSession(epoch, expectedID: identity)
+            var latest = try decodeFriendInvitation(record)
+            _ = try await validatedFriendShare(for: record, invitation: latest, scope: .shared, identity: identity, epoch: epoch)
+            try latest.accept(accountID: identity, name: name)
+            try encodePayload(latest, into: record)
+            _ = try await save(record, in: database)
+            try validateSession(epoch, expectedID: identity)
+            // The shared claim comes first. If the private write fails, the next
+            // refresh safely completes it using this same invitation.
+            _ = try await recordFriendConnection(latest, identity: identity, epoch: epoch)
+        } catch { throw readable(error) }
+    }
+
+    func removeFriendInvitation(_ invitation: FriendInvitation) async throws {
+        do {
+            let identity = try await account().id
+            let epoch = accountEpoch
+            guard invitation.owner.id == identity else { throw Failure.ownerOnly }
+            let database = container.privateCloudDatabase
+            let id = friendInvitationRecordID(invitation.id)
+            guard let record = try await optionalRecord(id, in: database) else { return }
+            try validateSession(epoch, expectedID: identity)
+            let latest = try decodeFriendInvitation(record)
+            guard latest.owner.id == identity else { throw Failure.ownerOnly }
+            // Deleting the invitation revokes it. Independently saved private
+            // friends remain saved if the connection had already completed.
+            let result = try await database.modifyRecords(saving: [], deleting: [id], savePolicy: .ifServerRecordUnchanged, atomically: true)
+            for entry in result.deleteResults.values { try entry.get() }
+            try validateSession(epoch, expectedID: identity)
+            friendInvitationLocations[invitation.id] = nil
+        } catch { throw readable(error) }
+    }
+
+    private func reconcileFriendInvitations(_ records: [(CKRecord, CKDatabase.Scope)], identity: String, epoch: Int) async throws
+        -> (pending: [FriendInvitation], saved: [CKRecord]) {
+        var pending: [FriendInvitation] = []
+        var saved: [CKRecord] = []
+        var nextLocations: [UUID: Location] = [:]
+        for (record, scope) in records where record.recordType == "GroupPayFriendInvitation" {
+            // A damaged invitation must not hide the user's otherwise valid bills.
+            guard let invitation = try? decodeFriendInvitation(record) else { continue }
+            guard scope == .private ? invitation.owner.id == identity : invitation.owner.id != identity else { continue }
+            if scope == .shared, let friend = invitation.friend, friend.id != identity { continue }
+            nextLocations[invitation.id] = Location(recordID: record.recordID, scope: scope)
+            do {
+                if invitation.friend == nil {
+                    if scope == .shared {
+                        _ = try await validatedFriendShare(for: record, invitation: invitation, scope: scope, identity: identity, epoch: epoch)
+                    }
+                    pending.append(invitation)
+                } else {
+                    let receiptID = friendReceiptRecordID(invitation)
+                    if let receipt = records.first(where: { $0.1 == .private && $0.0.recordID == receiptID })?.0 {
+                        try validateFriendReceipt(receipt, invitation: invitation, identity: identity)
+                        continue
+                    }
+                    _ = try await validatedFriendShare(for: record, invitation: invitation, scope: scope, identity: identity, epoch: epoch)
+                    saved.append(contentsOf: try await recordFriendConnection(invitation, identity: identity, epoch: epoch))
+                }
+            } catch {
+                try validateSession(epoch, expectedID: identity)
+                var pendingInvitation = invitation
+                if case Failure.unavailable(let message) = error {
+                    pendingInvitation.connectionIssue = message
+                } else {
+                    pendingInvitation.connectionIssue = "This friend connection couldn’t be completed. Refresh to retry, or ask the sender to check the invitation."
+                }
+                pending.append(pendingInvitation)
+            }
+        }
+        try validateSession(epoch, expectedID: identity)
+        friendInvitationLocations = nextLocations
+        return (pending, saved)
+    }
+
+    private func validatedFriendShare(for record: CKRecord, invitation: FriendInvitation, scope: CKDatabase.Scope,
+                                      identity: String, epoch: Int) async throws -> CKShare {
+        guard let reference = record.share,
+              let share = try await container.database(with: scope).record(for: reference.recordID) as? CKShare else {
+            throw Failure.unavailable("This friend invitation is no longer shared. Ask your friend for a new invitation.")
+        }
+        try validateSession(epoch, expectedID: identity)
+        guard share.publicPermission == .none, let current = share.currentUserParticipant else { throw Failure.invalidData }
+        if scope == .private {
+            guard current.role == .owner, invitation.owner.id == identity else { throw Failure.invalidData }
+        } else {
+            // Shared-zone ownership is server-assigned and remains available
+            // when Apple omits optional identity details from a participant.
+            let ownerID = share.owner.userIdentity.userRecordID?.recordName ?? record.recordID.zoneID.ownerName
+            guard current.role == .privateUser, current.acceptanceStatus == .accepted, current.permission == .readWrite,
+                  ownerID == invitation.owner.id else { throw Failure.invalidData }
+        }
+        let accepted = share.participants.filter { $0.role != .owner && $0.acceptanceStatus == .accepted }
+        guard accepted.count <= 1 else {
+            throw Failure.unavailable("Each friend invitation is for one person. Ask the sender to remove extra people from this invitation.")
+        }
+        if let friend = invitation.friend {
+            if scope == .shared {
+                guard friend.id == identity else { throw Failure.invalidData }
+            } else {
+                guard accepted.contains(where: { $0.userIdentity.userRecordID?.recordName == friend.id }) else { throw Failure.invalidData }
+            }
+        }
+        return share
+    }
+
+    private struct FriendReceipt: Codable {
+        let invitationID: UUID
+        let ownerID: String
+        let friendID: String
+    }
+
+    /// The private receipt is retained when a friend is removed. It prevents an
+    /// old shared invitation from re-adding them on another device or reinstall.
+    private func recordFriendConnection(_ invitation: FriendInvitation, identity: String, epoch: Int) async throws -> [CKRecord] {
+        guard let friend = invitation.connectedFriend(for: identity) else { throw Failure.invalidData }
+        try await ensureZone()
+        try validateSession(epoch, expectedID: identity)
+        let database = container.privateCloudDatabase
+        let receiptID = friendReceiptRecordID(invitation)
+        if let receipt = try await optionalRecord(receiptID, in: database) {
+            try validateSession(epoch, expectedID: identity)
+            try validateFriendReceipt(receipt, invitation: invitation, identity: identity)
+            return []
+        }
+        try validateSession(epoch, expectedID: identity)
+        let receipt = CKRecord(recordType: "GroupPayFriendReceipt", recordID: receiptID)
+        try encodePayload(FriendReceipt(invitationID: invitation.id, ownerID: invitation.owner.id, friendID: friend.id), into: receipt)
+        var saving = [receipt]
+        if let existing = try await optionalRecord(friendRecordID(friend.id), in: database) {
+            _ = try decodeFriend(existing)
+        } else {
+            let record = CKRecord(recordType: "GroupPayFriend", recordID: friendRecordID(friend.id))
+            try encodePayload(friend, into: record)
+            saving.append(record)
+        }
+        try validateSession(epoch, expectedID: identity)
+        let result = try await database.modifyRecords(saving: saving, deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+        try validateSession(epoch, expectedID: identity)
+        return try result.saveResults.values.map { try $0.get() }
+    }
+
+    private func validateFriendReceipt(_ record: CKRecord, invitation: FriendInvitation, identity: String) throws {
+        guard record.recordType == "GroupPayFriendReceipt", record.parent == nil, record.share == nil else { throw Failure.invalidData }
+        let receipt: FriendReceipt = try decodePayload(record)
+        guard record.recordID == friendReceiptRecordID(invitation), receipt.invitationID == invitation.id,
+              receipt.ownerID == invitation.owner.id, receipt.friendID == invitation.connectedFriend(for: identity)?.id else {
+            throw Failure.invalidData
+        }
     }
 
     func fetchGroups() async throws -> [PaymentGroup] {
@@ -594,6 +796,16 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
         CKRecord.ID(recordName: "group-" + id.uuidString, zoneID: zoneID)
     }
 
+    private func friendInvitationRecordID(_ id: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: "friend-invitation-" + id.uuidString, zoneID: zoneID)
+    }
+
+    private func friendReceiptRecordID(_ invitation: FriendInvitation) -> CKRecord.ID {
+        let key = SHA256.hash(data: Data((invitation.owner.id + "/" + invitation.id.uuidString).utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return CKRecord.ID(recordName: "friend-receipt-" + key, zoneID: zoneID)
+    }
+
     private func optionalRecord(_ id: CKRecord.ID, in database: CKDatabase) async throws -> CKRecord? {
         do { return try await database.record(for: id) }
         catch let error as CKError where error.code == .unknownItem { return nil }
@@ -686,6 +898,14 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
             throw Failure.invalidData
         }
         return friend
+    }
+
+    private func decodeFriendInvitation(_ record: CKRecord) throws -> FriendInvitation {
+        guard record.recordType == "GroupPayFriendInvitation", record.parent == nil else { throw Failure.invalidData }
+        let invitation: FriendInvitation = try decodePayload(record)
+        guard record.recordID.recordName == friendInvitationRecordID(invitation.id).recordName,
+              invitation.validationMessage == nil else { throw Failure.invalidData }
+        return invitation
     }
 
     private func save(_ record: CKRecord, in database: CKDatabase) async throws -> CKRecord {

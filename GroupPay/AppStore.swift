@@ -9,6 +9,7 @@ final class AppStore {
     var bills: [Bill] = []
     var friends: [SavedFriend] = []
     var groups: [PaymentGroup] = []
+    var friendInvitations: [FriendInvitation] = []
     var accountID: String?
     var name = UserDefaults.standard.string(forKey: "profileName") ?? "You"
     var busy = false
@@ -61,6 +62,7 @@ final class AppStore {
         bills = []
         friends = []
         groups = []
+        friendInvitations = []
         sharingController = nil
         lastSynced = nil
         notificationsEnabled = false
@@ -83,6 +85,7 @@ final class AppStore {
             bills = workspace.bills.sorted { $0.createdAt > $1.createdAt }
             friends = workspace.friends
             groups = workspace.groups
+            friendInvitations = workspace.friendInvitations
             isPreview = false
             connectionIssue = nil
             lastSynced = .now
@@ -99,7 +102,7 @@ final class AppStore {
         } catch {
             guard token == session else { return }
             accountID = nil
-            if !isPreview { bills = []; friends = []; groups = [] }
+            if !isPreview { bills = []; friends = []; groups = []; friendInvitations = [] }
             connectionIssue = error.localizedDescription
         }
     }
@@ -120,6 +123,7 @@ final class AppStore {
             bills = workspace.bills.sorted { $0.createdAt > $1.createdAt }
             friends = workspace.friends
             groups = workspace.groups
+            friendInvitations = workspace.friendInvitations
             connectionIssue = nil
             lastSynced = .now
             await cloud.syncRecurringReminders(bills)
@@ -147,6 +151,7 @@ final class AppStore {
         accountID = nil
         friends = []
         groups = []
+        friendInvitations = []
         bills = [Bill.demo(leaderID: "preview", name: name)]
     }
     func publish(_ bill: Bill) async -> Bool {
@@ -284,6 +289,67 @@ final class AppStore {
             guard token == session else { return }
             dataRevision += 1
             if let index = bills.firstIndex(where: { $0.id == id }) { bills[index] = updated }
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func createFriendInvitation(name: String, friendName: String) async -> FriendInvitation? {
+        guard connected, !busy else { return nil }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            let invitation = try await cloud.createFriendInvitation(ownerName: name, recipientName: friendName)
+            guard token == session else { return nil }
+            self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(self.name, forKey: "profileName")
+            friendInvitations.insert(invitation, at: 0)
+            dataRevision += 1
+            return invitation
+        } catch { if token == session { self.error = error.localizedDescription }; return nil }
+    }
+
+    func acceptFriendInvitation(_ invitation: FriendInvitation, name: String) async -> Bool {
+        guard connected, !busy else { return false }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            try await cloud.acceptFriendInvitation(invitation, name: name)
+            guard token == session else { return false }
+            self.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(self.name, forKey: "profileName")
+            // Reconcile the saved identity before offering it in a new group.
+            let workspace = try await cloud.fetchWorkspace()
+            guard token == session else { return false }
+            friends = workspace.friends
+            friendInvitations = workspace.friendInvitations
+            dataRevision += 1
+            return true
+        } catch { if token == session { self.error = error.localizedDescription }; return false }
+    }
+
+    func removeFriendInvitation(_ invitation: FriendInvitation) async {
+        guard connected, !busy else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            try await cloud.removeFriendInvitation(invitation)
+            guard token == session else { return }
+            friendInvitations.removeAll { $0.id == invitation.id }
+            dataRevision += 1
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    func invite(_ invitation: FriendInvitation) async {
+        guard connected, !busy else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            let controller = try await cloud.sharingController(for: invitation)
+            guard token == session else { return }
+            sharingController = controller
         } catch { if token == session { self.error = error.localizedDescription } }
     }
 

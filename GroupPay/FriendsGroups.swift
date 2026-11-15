@@ -14,14 +14,59 @@ struct CloudWorkspace: Sendable {
     var bills: [Bill]
     var friends: [SavedFriend]
     var groups: [PaymentGroup]
+    var friendInvitations: [FriendInvitation] = []
 }
 
-/// A saved, previously joined iCloud identity. This address book stays private.
+/// A saved iCloud identity. This address book stays private.
 struct SavedFriend: Codable, Identifiable, Hashable, Sendable {
     var id: String
     var name: String
 
     var accountID: String { id }
+}
+
+/// A standalone connection shared with one friend, without exposing any bills.
+/// The recipient fills in their own identity only after explicitly confirming.
+struct FriendInvitation: Codable, Identifiable, Sendable {
+    var id: UUID = UUID()
+    var owner: SavedFriend
+    var recipientName: String
+    var friend: SavedFriend?
+    var createdAt: Date = Date()
+    /// A local recovery message, never part of the shared payload.
+    var connectionIssue: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, owner, recipientName, friend, createdAt
+    }
+
+    var validationMessage: String? {
+        let people = [owner] + (friend.map { [$0] } ?? [])
+        guard people.allSatisfy({
+            !$0.id.isEmpty && $0.id.count <= 256 && $0.id == $0.id.trimmingCharacters(in: .whitespacesAndNewlines) &&
+                !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.count <= 100
+        }), !recipientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, recipientName.count <= 100 else {
+            return "Enter your name and your friend’s name, using up to 100 characters each."
+        }
+        if friend?.id == owner.id { return "Send this invitation to a different iCloud account." }
+        return nil
+    }
+
+    mutating func accept(accountID: String, name: String) throws {
+        guard accountID != owner.id else { throw BillError("You can’t accept your own friend invitation.") }
+        guard friend == nil || friend?.id == accountID else {
+            throw BillError("Someone else has already accepted this invitation. Ask for a new one.")
+        }
+        let previous = friend
+        friend = SavedFriend(id: accountID, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let message = validationMessage { friend = previous; throw BillError(message) }
+    }
+
+    func connectedFriend(for accountID: String) -> SavedFriend? {
+        if accountID == owner.id { return friend }
+        if accountID == friend?.id { return owner }
+        return nil
+    }
 }
 
 /// One private invitation grants access to this group's future child bills.

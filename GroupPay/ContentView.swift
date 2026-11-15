@@ -18,7 +18,8 @@ struct ContentView: View {
                 .tabItem { Label("Home", systemImage: "square.grid.2x2") }.tag(0)
             NavigationStack { activity }.tabItem { Label("Inbox", systemImage: "tray") }.badge(store.pendingBills.count).tag(1)
             NavigationStack { cards }.tabItem { Label("Cards", systemImage: "creditcard") }.tag(2)
-            NavigationStack { PeopleView() }.tabItem { Label("People", systemImage: "person.2") }.tag(4)
+            NavigationStack { PeopleView() }.tabItem { Label("People", systemImage: "person.2") }
+                .badge(store.friendInvitations.filter { $0.owner.id != store.accountID }.count).tag(4)
             NavigationStack { profile }.tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
         }
         .tint(GP.mint).preferredColorScheme(.dark)
@@ -37,7 +38,15 @@ struct ContentView: View {
             else { await store.connect() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .groupPayAccountChanged)) { _ in Task { route = []; await store.accountChanged() } }
-        .onReceive(NotificationCenter.default.publisher(for: .groupPayShareAccepted)) { _ in Task { await store.acceptedShare() } }
+        .onReceive(NotificationCenter.default.publisher(for: .groupPayShareAccepted)) { _ in
+            Task {
+                await store.acceptedShare()
+                if store.friendInvitations.contains(where: { $0.owner.id != store.accountID }) { tab = 4 }
+            }
+        }
+        .onChange(of: store.friendInvitations.map(\.id)) { old, _ in
+            if store.friendInvitations.contains(where: { $0.owner.id != store.accountID && !old.contains($0.id) }) { tab = 4 }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .groupPayCloudError)) { note in store.error = note.userInfo?["message"] as? String }
         .onChange(of: phase) { _, new in if new == .active { Task { await store.refresh() } } }
         .onReceive(NotificationCenter.default.publisher(for: .groupPayCloudChanged)) { _ in Task { await store.refresh() } }

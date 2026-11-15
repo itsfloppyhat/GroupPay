@@ -24,6 +24,68 @@ struct PeopleChecks {
         group.name = "  "
         check(group.validationMessage != nil, "Blank group names are rejected")
 
+        var invitation = FriendInvitation(owner: leader, recipientName: guest.name)
+        check(invitation.validationMessage == nil, "A friend invitation can be created before any bill or group exists")
+        check(invitation.connectedFriend(for: leader.id) == nil, "An invitation alone does not pretend the recipient has joined")
+        check(invitation.connectedFriend(for: guest.id) == nil, "A recipient label does not grant a saved identity")
+        let pendingData = try JSONEncoder().encode(invitation)
+        let pending = try JSONDecoder().decode(FriendInvitation.self, from: pendingData)
+        check(pending.id == invitation.id && pending.owner == leader && pending.friend == nil,
+              "Pending friend invitations survive persistence without a bill")
+        let invitationJSON = try JSONSerialization.jsonObject(with: pendingData) as! [String: Any]
+        check(invitationJSON["bills"] == nil && invitationJSON["card"] == nil && invitationJSON["groups"] == nil,
+              "Friend invitations contain no shared expenses or card data")
+        var recoveringInvitation = invitation
+        recoveringInvitation.connectionIssue = "Local connection recovery details"
+        let recoveryData = try JSONEncoder().encode(recoveringInvitation)
+        let recovered = try JSONDecoder().decode(FriendInvitation.self, from: recoveryData)
+        check(recovered.connectionIssue == nil && recovered.id == invitation.id &&
+              !String(decoding: recoveryData, as: UTF8.self).contains("Local connection recovery details"),
+              "Local connection issues are never persisted or shared with friends")
+
+        do {
+            try invitation.accept(accountID: leader.id, name: leader.name)
+            preconditionFailure("An owner must not be able to accept their own invitation")
+        } catch { check(invitation.friend == nil, "Rejected self-acceptance leaves the invitation available") }
+        for invalidID in ["", "  ", " guest", String(repeating: "x", count: 257)] {
+            do {
+                try invitation.accept(accountID: invalidID, name: guest.name)
+                preconditionFailure("An invalid iCloud identity must not claim an invitation")
+            } catch { check(invitation.friend == nil, "Rejected identity leaves the invitation unchanged") }
+        }
+        for invalidName in ["", " \n ", String(repeating: "x", count: 101)] {
+            do {
+                try invitation.accept(accountID: guest.id, name: invalidName)
+                preconditionFailure("An invalid name must not claim an invitation")
+            } catch { check(invitation.friend == nil, "Rejected name leaves the invitation unchanged") }
+        }
+        try invitation.accept(accountID: guest.id, name: "  Kyle  ")
+        check(invitation.friend == guest, "Accepting uses the recipient's connected identity and trims their name")
+        check(invitation.connectedFriend(for: leader.id) == guest, "The organizer saves the confirmed recipient")
+        check(invitation.connectedFriend(for: guest.id) == leader, "The recipient saves the organizer")
+        check(invitation.connectedFriend(for: "outsider") == nil, "Unrelated identities are not connected by an invitation")
+        try invitation.accept(accountID: guest.id, name: guest.name)
+        check(invitation.friend == guest, "Retrying acceptance recovers the same friend")
+        do {
+            try invitation.accept(accountID: "different-friend", name: "Someone else")
+            preconditionFailure("A second recipient must not replace the confirmed friend")
+        } catch { check(invitation.friend == guest, "A second recipient cannot change an accepted invitation") }
+        do {
+            try invitation.accept(accountID: guest.id, name: " ")
+            preconditionFailure("An invalid retry must not damage the existing connection")
+        } catch { check(invitation.friend == guest, "A failed retry preserves the confirmed friend") }
+        let accepted = try JSONDecoder().decode(FriendInvitation.self, from: JSONEncoder().encode(invitation))
+        check(accepted.id == invitation.id && accepted.friend == guest && accepted.owner == leader,
+              "Accepted identities survive persistence for both devices")
+        let firstGroup = PaymentGroup(name: "First group", ownerID: leader.id, members: [leader, accepted.friend!])
+        check(firstGroup.validationMessage == nil, "Connected friends can form a group without first splitting a bill")
+        var invalidInvitation = FriendInvitation(owner: leader, recipientName: " \n ")
+        check(invalidInvitation.validationMessage != nil, "A blank recipient label is rejected before creating an invitation")
+        invalidInvitation = FriendInvitation(owner: SavedFriend(id: "", name: "Matthew"), recipientName: "Kyle")
+        check(invalidInvitation.validationMessage != nil, "A signed-out identity cannot create an invitation")
+        invalidInvitation = FriendInvitation(owner: leader, recipientName: "Kyle", friend: leader)
+        check(invalidInvitation.validationMessage != nil, "Persisted self-connections are invalid")
+
         var bill = Bill(title: "Team dinner", items: [BillItem(name: "Dinner", amountCents: 10_000)], taxCents: 1_000,
                         members: [BillMember(name: "Matthew", accountID: "leader"), BillMember(name: "Kyle", accountID: "guest")],
                         leaderID: "leader", pricingVersion: 2)
