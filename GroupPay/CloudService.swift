@@ -67,6 +67,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     }
 
     func account() async throws -> (id: String, name: String) {
+        #if DEBUG && targetEnvironment(simulator)
+        if let role = SimulatorDemo.shared.role { return (role.accountID, role.name) }
+        #endif
         // Simulator builds can run without CloudKit entitlements. Do not instantiate
         // CKContainer there: its entitlement assertion is an Objective-C exception.
         #if targetEnvironment(simulator)
@@ -144,6 +147,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     /// One complete snapshot keeps bills, saved friends, and groups consistent
     /// and avoids scanning the same shared zones three times per foreground sync.
     func fetchWorkspace() async throws -> CloudWorkspace {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return try await SimulatorDemo.shared.workspace() }
+        #endif
         do {
             let identity = try await account().id
             let epoch = accountEpoch
@@ -495,6 +501,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     }
 
     func create(_ bill: Bill) async throws -> Bill {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return try await SimulatorDemo.shared.create(bill) }
+        #endif
         do {
             let identity = try await account().id
             let epoch = accountEpoch
@@ -524,6 +533,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
 
     /// A concurrent save fails visibly and never replaces another person's approval.
     func update(id: UUID, expectedAccountID: String, mutation: (inout Bill) throws -> Void) async throws -> Bill {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return try await SimulatorDemo.shared.update(id: id, expectedAccountID: expectedAccountID, mutation: mutation) }
+        #endif
         do {
             let identity = try await account().id
             let epoch = accountEpoch
@@ -548,6 +560,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     }
 
     func sharingController(for bill: Bill) async throws -> UICloudSharingController {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { throw Failure.unavailable("In this simulator demo, saved friend Dylan receives the split automatically. Send Curtis his personal web link.") }
+        #endif
         do {
             let identity = try await account().id
             let epoch = accountEpoch
@@ -631,19 +646,36 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     /// Check the server subscription on reconnect instead of trusting a stale
     /// device flag after a reinstall, restored backup, or new share acceptance.
     func configureNotifications() async throws -> Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return false }
+        #endif
+        let identity = try await account().id
+        let epoch = accountEpoch
         do {
-            let identity = try await account().id
-            let epoch = accountEpoch
             try await repairSubscriptions(epoch: epoch, identity: identity)
             UIApplication.shared.registerForRemoteNotifications()
             return try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
-        } catch { throw readable(error) }
+        } catch Failure.accountChanged {
+            throw Failure.accountChanged
+        } catch let error as CKError where error.code == .notAuthenticated {
+            throw readable(error)
+        } catch {
+            throw Failure.unavailable("Notifications couldn’t be enabled. Your bills are still available. Try enabling notifications again in Profile.")
+        }
     }
 
     private func repairSubscriptions(epoch: Int, identity: String) async throws {
         for (scope, suffix) in [(CKDatabase.Scope.private, "private"), (.shared, "shared")] {
             let database = container.database(with: scope)
-            let subscriptions = try await database.allSubscriptions()
+            let subscriptions: [CKSubscription]
+            do {
+                subscriptions = try await database.allSubscriptions()
+            } catch let error as CKError where error.code == .unknownItem {
+                // CloudKit can report a missing subscription collection before
+                // the first registration. Saving our stable IDs also repairs
+                // this state without creating duplicate subscriptions.
+                subscriptions = []
+            }
             try validateSession(epoch, expectedID: identity)
             for channel in CloudNotificationChannel.all {
                 let identifier = channel.subscriptionID(scope: suffix)
@@ -779,6 +811,9 @@ final class CloudService: NSObject, UICloudSharingControllerDelegate {
     /// a bill, approve a share, issue a card, or move money in the background.
     /// Permission is requested only by configureNotifications(), never here.
     func syncRecurringReminders(_ bills: [Bill]) async {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return }
+        #endif
         let epoch = accountEpoch
         let identity = currentUserID
         let previous = recurringReminderTask

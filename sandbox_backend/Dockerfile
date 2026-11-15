@@ -4,7 +4,8 @@ WORKDIR /app
 COPY requirements-cloud.txt ./
 RUN pip install --no-cache-dir -r requirements-cloud.txt \
     && groupadd --system app && useradd --system --gid app app
-COPY server.py storage.py cloud_app.py ./
+COPY server.py storage.py cloud_app.py guest.py ./
+COPY guest_web ./guest_web
 COPY cloud/gunicorn.conf.py ./gunicorn.conf.py
 USER app
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "cloud_app:create_app()"]

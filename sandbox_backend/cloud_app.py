@@ -9,6 +9,8 @@ import re
 
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
+from guest import GuestService, FirestoreGuestStore, register_guest_routes
+from storage import StoreConflict, StoreUnavailable
 
 from server import APIError, Config, Issuer, MAX_BODY, MAX_CENTS, TOKEN, validate_request
 
@@ -17,6 +19,8 @@ DAILY_NEW_INTENT_LIMIT = 100
 
 # Never send exception text, provider bodies, credentials, or submitted data to a client.
 ERRORS = {
+    "guest_unavailable": (404, "This guest invitation is unavailable or closed."),
+    "guest_already_approved": (409, "This portion has already been approved."),
     "unauthorized": (401, "Enter the shared sandbox client token in Group Pay settings."),
     "origin_not_allowed": (403, "Browser-origin requests are not supported."),
     "not_found": (404, "No card issuance or route was found."),
@@ -110,8 +114,10 @@ def configured_issuer(env: dict[str, str] | None = None) -> Issuer:
         raise RuntimeError("Cloud sandbox startup configuration is incomplete or durable storage could not be initialized.") from None
 
 
-def create_app(issuer=None) -> Flask:
+def create_app(issuer=None, guest_service=None) -> Flask:
     issuer = issuer if issuer is not None else configured_issuer()
+    if guest_service is None and hasattr(getattr(issuer, "store", None), "client"):
+        guest_service = GuestService(FirestoreGuestStore(issuer.store), issuer.config.client_token)
     app = Flask(__name__)
     app.config.update(MAX_CONTENT_LENGTH=MAX_BODY, DEBUG=False, TESTING=False, PROPAGATE_EXCEPTIONS=False)
     app.url_map.merge_slashes = False
@@ -120,11 +126,22 @@ def create_app(issuer=None) -> Flask:
 
     @app.before_request
     def authenticate():
-        if request.headers.get("Origin") is not None:
+        guest_browser = request.path == "/guest-api/portion"
+        guest_asset = request.path in ("/guest", "/guest/guest.js", "/guest/guest.css") and request.method in ("GET", "HEAD")
+        if guest_browser:
+            # Only same-origin browser fetches with a portion-specific credential.
+            origin = request.headers.get("Origin")
+            if origin is not None and origin not in (request.host_url.rstrip("/"), "https://" + request.host):
+                return _error("origin_not_allowed")
+            if request.headers.get("Sec-Fetch-Site") == "cross-site":
+                return _error("origin_not_allowed")
+        elif request.headers.get("Origin") is not None:
             return _error("origin_not_allowed")
         if request.query_string:
             return _error("not_found")
         if request.path == "/health" and request.method in ("GET", "HEAD"):
+            return None
+        if guest_browser or guest_asset:
             return None
         supplied = request.headers.get("Authorization", "").encode("utf-8")
         expected = ("Bearer " + issuer.config.client_token).encode("utf-8")
@@ -137,8 +154,13 @@ def create_app(issuer=None) -> Flask:
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = "default-src 'none'"
+        if request.path == "/guest" or request.path.startswith("/guest/"):
+            response.headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; font-src data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    register_guest_routes(app, guest_service)
 
     @app.route("/health", methods=["GET"], provide_automatic_options=False)
     def health():
@@ -147,7 +169,8 @@ def create_app(issuer=None) -> Flask:
     @app.route("/v1/status", methods=["GET"], provide_automatic_options=False)
     def status():
         return jsonify(ready=issuer.config.ready, environment="sandbox", maxAmountCents=MAX_CARD_CENTS,
-                       dailyNewIntentLimit=DAILY_NEW_INTENT_LIMIT, supportedPricingVersions=[1, 2])
+                       dailyNewIntentLimit=DAILY_NEW_INTENT_LIMIT, supportedPricingVersions=[1, 2],
+                       supportsGuestApprovals=guest_service is not None)
 
     @app.route("/v1/cards", methods=["POST"], provide_automatic_options=False)
     def issue():
@@ -185,6 +208,14 @@ def create_app(issuer=None) -> Flask:
         if code != 200:
             return _error("internal_error")
         return jsonify(_masked_card(body))
+
+    @app.errorhandler(StoreConflict)
+    def guest_conflict(error):
+        return _error(error.code)
+
+    @app.errorhandler(StoreUnavailable)
+    def guest_storage_error(_error_value):
+        return _error("storage_unavailable")
 
     @app.errorhandler(APIError)
     def api_error(error):

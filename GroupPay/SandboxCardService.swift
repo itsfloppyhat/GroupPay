@@ -223,6 +223,32 @@ final class SandboxCardService {
         return card
     }
 
+    func checkGuestAvailability() async throws {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return }
+        #endif
+        let data = try await request(path: "v1/status", method: "GET")
+        struct Status: Decodable { let supportsGuestApprovals: Bool? }
+        guard let status = try? JSONDecoder().decode(Status.self, from: data), status.supportsGuestApprovals == true else {
+            throw BillError("Guest webpages aren’t available on this team connection yet. Ask your organizer to update the service.")
+        }
+    }
+
+    func guestInvitation(_ invitation: GuestInvitation, create: Bool = false, close: Bool = false) async throws -> GuestApproval {
+        #if DEBUG && targetEnvironment(simulator)
+        if SimulatorDemo.shared.enabled { return try await SimulatorDemo.shared.invitation(invitation, create: create, close: close) }
+        #endif
+        guard baseURL == invitation.baseURL else {
+            throw BillError("Restore the original team connection to manage this guest invitation.")
+        }
+        let path = "v1/guest-invitations" + (create ? "" : "/" + invitation.portion.invitationID.uuidString + (close ? "/close" : ""))
+        let data = try await request(path: path, method: create || close ? "POST" : "GET",
+                                     body: create ? JSONEncoder().encode(invitation.portion) : nil)
+        guard let result = try? JSONDecoder().decode(GuestApproval.self, from: data),
+              result.portion == invitation.portion else { throw SandboxConnectionError.invalidResponse }
+        return result
+    }
+
     static func parseDate(_ value: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -363,8 +389,8 @@ struct SandboxConnectionView: View {
                         HStack(spacing: 12) {
                             Image(systemName: "creditcard").font(.title2).foregroundStyle(GP.mint)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Test mode").font(.headline)
-                                Text("Marqeta test cards").font(.subheadline).foregroundStyle(GP.secondary)
+                                Text("Test mode").font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                                Text("Marqeta test cards").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                             }
                         }
                         Toggle("Use test cards", isOn: Binding(
@@ -375,14 +401,14 @@ struct SandboxConnectionView: View {
                             }
                         )).disabled(!service.configured || busy)
                         Text("Creates cards with test funds after everyone approves. No real money moves, and these cards can’t pay a business.")
-                            .font(.caption).foregroundStyle(GP.secondary)
+                            .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     }
                     Panel {
                         HStack {
-                            Text("Connection").font(.headline)
+                            Text("Connection").font(GP.body(17, weight: .semibold, relativeTo: .headline))
                             Spacer()
                             Text(service.configured ? "Saved" : "Not set up")
-                                .font(.caption).foregroundStyle(service.configured ? GP.mint : GP.secondary)
+                                .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(service.configured ? GP.mint : GP.secondary)
                         }
                         DisclosureGroup("Connection details", isExpanded: $showConnectionDetails) {
                             VStack(alignment: .leading, spacing: 12) {
@@ -391,7 +417,7 @@ struct SandboxConnectionView: View {
                                 SecureField(service.configured ? "Token saved · leave blank to keep it" : "Group Pay connection token", text: $clientToken)
                                     .textInputAutocapitalization(.never).autocorrectionDisabled().gpField()
                                 Text("Use only the local Group Pay token. Your Marqeta application and admin credentials stay on your Mac; never enter them here.")
-                                    .font(.caption).foregroundStyle(GP.secondary)
+                                    .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                                 if service.configured {
                                     Button("Remove saved connection", role: .destructive) {
                                         do {
@@ -400,17 +426,17 @@ struct SandboxConnectionView: View {
                                             clientToken = ""
                                             status = nil; error = nil
                                         } catch { self.error = error.localizedDescription }
-                                    }.font(.subheadline).disabled(busy)
+                                    }.font(GP.body(15, weight: .regular, relativeTo: .subheadline)).disabled(busy)
                                 }
                             }.padding(.top, 12)
-                        }.font(.subheadline)
+                        }.font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                         Button(busy ? "Checking…" : "Save & check connection") { checkConnection() }
                             .buttonStyle(PrimaryButton()).disabled(busy)
                         if let status {
-                            Label(status, systemImage: "checkmark.circle").font(.subheadline).foregroundStyle(GP.mint)
+                            Label(status, systemImage: "checkmark.circle").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                         }
                         if let error = error ?? service.setupError {
-                            Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(GP.amber)
+                            Label(error, systemImage: "exclamationmark.triangle").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.amber)
                         }
                     }
                     #if targetEnvironment(simulator)
@@ -419,7 +445,7 @@ struct SandboxConnectionView: View {
                 }.padding(22)
             }.gpPage().navigationTitle("Test cards").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
-        }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(busy)
+        }.preferredColorScheme(.light).tint(GP.mint).interactiveDismissDisabled(busy)
     }
 
     private func checkConnection() {
@@ -441,12 +467,12 @@ struct SandboxConnectionView: View {
     #if targetEnvironment(simulator)
     private var testPanel: some View {
         Panel {
-            Label("Try a $10 card", systemImage: "creditcard").font(.headline)
+            Label("Try a $10 card", systemImage: "creditcard").font(GP.body(17, weight: .semibold, relativeTo: .headline))
             Text("Uses a sample bill and test participants. No real money moves.")
-                .font(.caption).foregroundStyle(GP.secondary)
+                .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
             if let card = testCard {
                 Text("•••• \(card.lastFour)").font(.title2.monospaced().bold())
-                Text("\(card.state.capitalized) · \(Money.string(cents: card.loadedCents)) in test funds").font(.subheadline).foregroundStyle(GP.mint)
+                Text("\(card.state.capitalized) · \(Money.string(cents: card.loadedCents)) in test funds").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                 Button("New test") {
                     testBillID = SandboxCardService.newTestBillID()
                     testCard = nil; error = nil
@@ -454,7 +480,7 @@ struct SandboxConnectionView: View {
             } else {
                 Button(busy ? "Working…" : "Create $10 test card") { issueTestCard() }
                     .buttonStyle(PrimaryButton()).disabled(!service.configured || !service.enabled || busy)
-                Text("Trying again keeps the same test, even after reopening this screen.").font(.caption).foregroundStyle(GP.secondary)
+                Text("Trying again keeps the same test, even after reopening this screen.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
             }
         }
     }

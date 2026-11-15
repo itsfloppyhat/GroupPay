@@ -24,7 +24,7 @@ SERVICE = "group-pay-sandbox"
 REPOSITORY = "group-pay"
 RUNTIME_ACCOUNT = "group-pay-runtime"
 BUILD_ACCOUNT = "group-pay-build"
-SOURCES = ("Dockerfile", ".dockerignore", "requirements-cloud.txt", "server.py", "storage.py", "cloud_app.py", "cloud/gunicorn.conf.py")
+SOURCES = ("Dockerfile", ".dockerignore", "requirements-cloud.txt", "server.py", "storage.py", "cloud_app.py", "guest.py", "guest_web/index.html", "guest_web/guest.js", "guest_web/guest.css", "cloud/gunicorn.conf.py")
 SECRETS = {
     "MARQETA_APPLICATION_TOKEN": "group-pay-marqeta-application-token",
     "MARQETA_ADMIN_ACCESS_TOKEN": "group-pay-marqeta-admin-access-token",

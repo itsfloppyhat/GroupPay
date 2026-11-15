@@ -21,10 +21,10 @@ struct PeopleView: View {
                 } else {
                     invitations
                     HStack {
-                        Text("Your groups").font(.title3.weight(.semibold))
+                        Text("Your groups").font(GP.display(22, relativeTo: .title3))
                         Spacer()
                         Button { creatingGroup = true } label: { Label("New group", systemImage: "plus") }
-                            .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint).disabled(store.friends.isEmpty || store.busy)
+                            .font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint).disabled(store.friends.isEmpty || store.busy)
                     }
                     if store.groups.isEmpty {
                         EmptyPanel(symbol: "person.3", title: "An invitation that lasts.", subtitle: "Add friends, then make a group. Once everyone accepts the group invitation, future bills arrive here without another text.")
@@ -34,31 +34,31 @@ struct PeopleView: View {
                             HStack(spacing: 14) {
                                 IconTile(symbol: "person.3.fill")
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(group.name).font(.headline)
+                                    Text(group.name).font(GP.body(17, weight: .semibold, relativeTo: .headline))
                                     Text(group.members.map(\.name).joined(separator: ", "))
-                                        .font(.caption).foregroundStyle(GP.secondary)
+                                        .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                                 }
                             }
                             if group.ownerID == store.accountID {
                                 Button { Task { await store.invite(group) } } label: { Label("Invite or manage group", systemImage: "person.badge.plus") }
-                                    .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(store.busy)
+                                    .font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(store.busy)
                                 Text("Choose this group when starting your next split. Members accept this invitation once.")
-                                    .font(.caption).foregroundStyle(GP.secondary)
+                                    .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             } else {
                                 Text("New bills from this group will appear automatically.")
-                                    .font(.caption).foregroundStyle(GP.secondary)
+                                    .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             }
                         }
                     }
-                    Text("Saved friends").font(.title3.weight(.semibold))
+                    Text("Saved friends").font(GP.display(22, relativeTo: .title3))
                     if store.friends.isEmpty {
-                        Text("Add a friend now so they’re ready for your first split. You can also save people from past bills.").font(.subheadline).foregroundStyle(GP.secondary)
+                        Text("Add a friend now so they’re ready for your first split. You can also save people from past bills.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                     }
                     ForEach(store.friends) { friend in
                         Panel(padding: 16) {
                             HStack(spacing: 12) {
                                 Avatar(name: friend.name)
-                                Text(friend.name).font(.headline)
+                                Text(friend.name).font(GP.body(17, weight: .semibold, relativeTo: .headline))
                                 Spacer()
                                 Button { removing = friend } label: { Image(systemName: "minus.circle").frame(width: 44, height: 44) }
                                     .foregroundStyle(GP.secondary).accessibilityLabel("Remove \(friend.name) from saved friends").disabled(store.busy)
@@ -66,15 +66,15 @@ struct PeopleView: View {
                         }
                     }
                     if !store.friendSuggestions.isEmpty {
-                        Text("People you’ve split with").font(.title3.weight(.semibold))
+                        Text("People you’ve split with").font(GP.display(22, relativeTo: .title3))
                         ForEach(store.friendSuggestions) { friend in
                             Panel(padding: 16) {
                                 HStack(spacing: 12) {
                                     Avatar(name: friend.name)
-                                    Text(friend.name).font(.headline)
+                                    Text(friend.name).font(GP.body(17, weight: .semibold, relativeTo: .headline))
                                     Spacer()
                                     Button("Save friend") { Task { await store.saveFriend(friend) } }
-                                        .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(store.busy)
+                                        .font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(store.busy)
                                 }
                             }
                         }
@@ -112,21 +112,21 @@ struct PeopleView: View {
 
     @ViewBuilder private var invitations: some View {
         if !store.friendInvitations.isEmpty {
-            Text("Friend invitations").font(.title3.weight(.semibold))
+            Text("Friend invitations").font(GP.display(22, relativeTo: .title3))
             ForEach(store.friendInvitations) { invitation in
                 let outgoing = invitation.owner.id == store.accountID
                 Panel(padding: 18) {
                     HStack(spacing: 12) {
                         Avatar(name: outgoing ? invitation.recipientName : invitation.owner.name)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(outgoing ? invitation.recipientName : invitation.owner.name).font(.headline)
+                            Text(outgoing ? invitation.recipientName : invitation.owner.name).font(GP.body(17, weight: .semibold, relativeTo: .headline))
                             Text(outgoing ? "Waiting for your friend to join" : "Wants to add you as a friend")
-                                .font(.caption).foregroundStyle(GP.secondary)
+                                .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                         }
                         Spacer(minLength: 0)
                     }
                     if let issue = invitation.connectionIssue {
-                        Text(issue).font(.caption).foregroundStyle(GP.amber)
+                        Text(issue).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.amber)
                     }
                     if outgoing {
                         HStack {
@@ -135,7 +135,7 @@ struct PeopleView: View {
                             Spacer()
                             Button("Cancel", role: .destructive) { cancelling = invitation }
                                 .foregroundStyle(GP.secondary)
-                        }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).disabled(store.busy)
+                        }.font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).frame(minHeight: 44).disabled(store.busy)
                     } else {
                         Button("Add friend") { accepting = invitation }
                             .buttonStyle(PrimaryButton()).disabled(store.busy)
@@ -168,24 +168,24 @@ private struct AddFriendView: View {
                     PageHeading(overline: "Your people", title: invitation == nil ? "Friends first.\nSplits later." : "Keep in touch.")
                     Text(invitation.map { "Add \($0.owner.name) to your saved friends. You’ll be saved in their list, too." }
                          ?? "Send a private invitation. Once your friend joins, you’ll both have each other saved for future splits.")
-                        .font(.subheadline).foregroundStyle(GP.secondary)
+                        .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                     Panel {
-                        Text("Your name").font(.subheadline.weight(.semibold))
+                        Text("Your name").font(GP.body(15, weight: .semibold, relativeTo: .subheadline))
                         TextField("How your friends know you", text: $yourName).textContentType(.name).gpField()
                             .accessibilityIdentifier("friendInvitationYourName")
                         if invitation == nil {
-                            Text("Friend’s name").font(.subheadline.weight(.semibold)).padding(.top, 8)
+                            Text("Friend’s name").font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).padding(.top, 8)
                             TextField("Who would you like to add?", text: $friendName).textContentType(.name).gpField()
                                 .accessibilityIdentifier("friendInvitationRecipientName")
                         }
                     }
                     Text("Adding a friend doesn’t share any bills. Choose who’s included each time you split or create a group.")
-                        .font(.caption).foregroundStyle(GP.secondary)
+                        .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     if !store.connected {
                         Label("Connect iCloud in Profile to add friends.", systemImage: "icloud")
-                            .font(.subheadline).foregroundStyle(GP.amber)
+                            .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.amber)
                     }
-                    if let issue { Text(issue).font(.subheadline).foregroundStyle(GP.amber) }
+                    if let issue { Text(issue).font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.amber) }
                     Button(store.busy ? "Saving…" : invitation == nil ? "Create invitation" : "Add friend") {
                         Task {
                             issue = nil
@@ -203,7 +203,7 @@ private struct AddFriendView: View {
             }.gpPage().navigationTitle(invitation == nil ? "Add friend" : "Friend invitation").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(store.busy) } }
                 .onAppear { yourName = store.name == "You" ? "" : store.name }
-        }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(store.busy)
+        }.preferredColorScheme(.light).tint(GP.mint).interactiveDismissDisabled(store.busy)
     }
 }
 
@@ -218,7 +218,7 @@ private struct NewGroupView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     PageHeading(overline: "Together again", title: "Make it a group.")
                     TextField("Group name", text: $name).gpField()
-                    Text("You’re included as the group organizer.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("You’re included as the group organizer.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                     ForEach(store.friends) { friend in
                         Button {
                             if selected.contains(friend.id) { selected.remove(friend.id) } else { selected.insert(friend.id) }
@@ -226,7 +226,7 @@ private struct NewGroupView: View {
                             Panel(padding: 18) {
                                 HStack {
                                     Avatar(name: friend.name)
-                                    Text(friend.name).font(.headline).foregroundStyle(GP.text)
+                                    Text(friend.name).font(GP.body(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(GP.text)
                                     Spacer()
                                     Image(systemName: selected.contains(friend.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(GP.mint)
                                 }
@@ -234,7 +234,7 @@ private struct NewGroupView: View {
                         }.buttonStyle(.plain)
                     }
                     Text("After creating the group, use Invite or manage group to send one invitation. Future bills in this group share access automatically.")
-                        .font(.subheadline).foregroundStyle(GP.secondary)
+                        .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                     Button(store.busy ? "Creating…" : "Create group") {
                         Task {
                             if await store.createGroup(name: name, friends: store.friends.filter { selected.contains($0.id) }) != nil { dismiss() }
@@ -243,6 +243,6 @@ private struct NewGroupView: View {
                 }.padding(22)
             }.gpPage().navigationTitle("New group").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(store.busy) } }
-        }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(store.busy)
+        }.preferredColorScheme(.light).tint(GP.mint).interactiveDismissDisabled(store.busy)
     }
 }

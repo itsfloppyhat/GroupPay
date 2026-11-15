@@ -46,6 +46,32 @@ struct BillItem: Codable, Identifiable, Sendable {
     var assigneeIDs: [UUID] = []
 }
 
+struct GuestPortion: Codable, Equatable, Sendable {
+    let invitationID: UUID
+    let billID: UUID
+    let memberID: UUID
+    let cycle: Int
+    let title: String
+    let name: String
+    let foodCents: Int
+    let taxCents: Int
+    let feeCents: Int
+    let tipCents: Int
+}
+
+struct GuestInvitation: Codable, Sendable {
+    let portion: GuestPortion
+    let baseURL: String
+}
+
+struct GuestApproval: Codable, Sendable {
+    let portion: GuestPortion
+    let approvedTipCents: Int?
+    let closed: Bool
+    let expired: Bool
+    let token: String?
+}
+
 struct BillMember: Codable, Identifiable, Sendable {
     var id: UUID = UUID()
     var name: String
@@ -55,6 +81,7 @@ struct BillMember: Codable, Identifiable, Sendable {
     // Missing fields preserve existing bills and use the bill's category default.
     var tipPercent: Int? = nil
     var tipOverrideCents: Int? = nil
+    var guestInvitation: GuestInvitation? = nil
 }
 
 struct VirtualCard: Codable, Identifiable, Sendable {
@@ -356,6 +383,57 @@ struct Bill: Codable, Identifiable, Sendable {
         })
     }
 
+    mutating func inviteGuest(memberID: UUID, accountID: String, baseURL: String) throws {
+        try requireLeader(accountID)
+        try requireCollecting()
+        guard usesPersonalPricing, validationMessage == nil,
+              let index = members.firstIndex(where: { $0.id == memberID }),
+              members[index].accountID == nil else {
+            throw BillError("Guest links are available for unclaimed portions on new splits.")
+        }
+        let portion = GuestPortion(invitationID: UUID(), billID: id, memberID: memberID,
+                                   cycle: cycle, title: title, name: members[index].name,
+                                   foodCents: foodShares[memberID] ?? 0, taxCents: taxShares[memberID] ?? 0,
+                                   feeCents: feeShares[memberID] ?? 0, tipCents: tipShares[memberID] ?? 0)
+        members[index].guestInvitation = GuestInvitation(portion: portion, baseURL: baseURL)
+        members[index].accountID = "guest:" + portion.invitationID.uuidString
+        members[index].approved = false
+    }
+
+    mutating func applyGuestApproval(_ approval: GuestApproval, accountID: String) throws {
+        try requireLeader(accountID)
+        try requireCollecting()
+        let portion = approval.portion
+        guard portion.billID == id, portion.cycle == cycle,
+              let index = members.firstIndex(where: { $0.id == portion.memberID }),
+              members[index].guestInvitation?.portion == portion,
+              members[index].accountID == "guest:" + portion.invitationID.uuidString,
+              foodShares[portion.memberID] == portion.foodCents,
+              taxShares[portion.memberID] == portion.taxCents,
+              feeShares[portion.memberID] == portion.feeCents,
+              let tip = approval.approvedTipCents else {
+            throw BillError("This guest approval no longer matches the portion. Refresh the split.")
+        }
+        // A final approval survives link expiry and retry; it cannot change later.
+        if members[index].approved {
+            guard tipShares[portion.memberID] == tip else { throw BillError("The guest approval changed unexpectedly.") }
+            return
+        }
+        try approve(accountID: "guest:" + portion.invitationID.uuidString, tipAmountCents: tip)
+    }
+
+    mutating func removeGuestInvitation(memberID: UUID, invitationID: UUID, accountID: String) throws {
+        try requireLeader(accountID)
+        try requireCollecting()
+        guard let index = members.firstIndex(where: { $0.id == memberID }),
+              members[index].guestInvitation?.portion.invitationID == invitationID else {
+            throw BillError("This invitation has changed. Refresh the split.")
+        }
+        members[index].guestInvitation = nil
+        members[index].accountID = nil
+        members[index].approved = false
+    }
+
     mutating func claim(memberID: UUID, accountID: String) throws {
         try requireCollecting()
         guard !accountID.isEmpty else { throw BillError("Connect your iCloud account first.") }
@@ -515,7 +593,13 @@ struct Bill: Codable, Identifiable, Sendable {
         status = .collecting
         card = nil
         sandboxBackendID = nil
-        for index in members.indices { members[index].approved = members[index].accountID == leaderID }
+        for index in members.indices {
+            if members[index].guestInvitation != nil {
+                members[index].guestInvitation = nil
+                members[index].accountID = nil
+            }
+            members[index].approved = members[index].accountID == leaderID
+        }
         // The selected next-due date now belongs to this unpaid cycle. Move it
         // forward only after payment, so starting a cycle cannot skip its date.
     }

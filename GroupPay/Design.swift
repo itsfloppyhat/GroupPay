@@ -1,14 +1,66 @@
 import SwiftUI
 
+// Organic visual system from the supplied GroupPay prototype.
 enum GP {
-    static let background = Color(red: 0.039, green: 0.082, blue: 0.067)
-    static let surface = Color(red: 0.074, green: 0.129, blue: 0.106)
-    static let raised = Color(red: 0.118, green: 0.188, blue: 0.157)
-    static let text = Color(red: 0.953, green: 0.957, blue: 0.914)
-    static let mint = Color(red: 0.761, green: 0.941, blue: 0.667)
-    static let secondary = Color(red: 0.663, green: 0.737, blue: 0.682)
-    static let amber = Color(red: 0.973, green: 0.792, blue: 0.565)
-    static let border = Color(red: 0.70, green: 0.83, blue: 0.73).opacity(0.09)
+    static let background = Color(hex: 0xF5EAD8)
+    static let surface = Color(hex: 0xEBDDC5)
+    static let raised = Color(hex: 0xF9F4ED)
+    static let text = Color(hex: 0x201E1D)
+    static let accent = Color(hex: 0xC67139)
+    // Existing call sites use mint for interactive text; this darker terracotta
+    // keeps small labels legible on the light surfaces.
+    static let mint = Color(hex: 0x8C491A)
+    static let secondary = Color(hex: 0x645C50)
+    static let amber = Color(hex: 0x8C491A)
+    static let sage = Color(hex: 0x56633F)
+    static let sageSurface = Color(hex: 0xE1EECC)
+    static let peach = Color(hex: 0xFFE1D0)
+    static let border = Color(hex: 0x201E1D).opacity(0.12)
+
+    static func display(_ size: CGFloat, relativeTo style: Font.TextStyle = .title) -> Font {
+        .custom("Caprasimo-Regular", size: size, relativeTo: style)
+    }
+    static func body(_ size: CGFloat = 17, weight: Font.Weight = .regular,
+                     relativeTo style: Font.TextStyle = .body) -> Font {
+        let name = weight == .bold ? "Figtree-Bold" : weight == .semibold || weight == .medium ? "Figtree-SemiBold" : "Figtree-Regular"
+        return .custom(name, size: size, relativeTo: style)
+    }
+}
+
+private extension Color {
+    init(hex: UInt32) {
+        self.init(.sRGB, red: Double((hex >> 16) & 255) / 255,
+                  green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, opacity: 1)
+    }
+}
+
+/// Only animates changes to the supplied visual state, never background refreshes.
+private struct GPValueAnimation<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var value: Value
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : .smooth(duration: 0.35), value: value)
+    }
+}
+
+struct SoftPressButton: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+struct AnimatedSymbol: View {
+    var name: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        Image(systemName: name)
+            .contentTransition(.symbolEffect(.replace))
+            .symbolEffectsRemoved(reduceMotion)
+    }
 }
 
 struct Panel<Content: View>: View {
@@ -18,8 +70,9 @@ struct Panel<Content: View>: View {
         VStack(alignment: .leading, spacing: 16, content: content)
             .padding(padding).frame(maxWidth: .infinity, alignment: .leading)
             .foregroundStyle(GP.text)
-            .background(GP.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(GP.border))
+            .background(GP.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(GP.border))
+            .shadow(color: GP.text.opacity(0.035), radius: 8, x: 0, y: 3)
     }
 }
 
@@ -29,15 +82,15 @@ struct PrimaryButton: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.headline.weight(.semibold))
+            .font(GP.body(17, weight: .semibold, relativeTo: .headline))
             .multilineTextAlignment(.center)
             .padding(.horizontal, 20).padding(.vertical, 16)
             .frame(maxWidth: .infinity, minHeight: 54)
-            .foregroundStyle(enabled ? GP.background : GP.secondary)
-            .background(enabled ? GP.mint : GP.raised, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .foregroundStyle(enabled ? GP.raised : GP.secondary)
+            .background(enabled ? GP.mint : GP.surface, in: Capsule())
             .opacity(enabled && configuration.isPressed ? 0.84 : 1)
             .scaleEffect(enabled && configuration.isPressed && !reduceMotion ? 0.985 : 1)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -61,10 +114,7 @@ struct Avatar: View {
     @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
     private var diameter: CGFloat { size * min(scale, 1.45) }
     private var tint: Color {
-        let palette = [GP.mint,
-                       Color(red: 0.79, green: 0.76, blue: 0.91),
-                       Color(red: 0.95, green: 0.77, blue: 0.61),
-                       Color(red: 0.65, green: 0.82, blue: 0.84)]
+        let palette = [GP.mint, GP.sage, Color(hex: 0x765083), Color(hex: 0x356C73)]
         return palette[Int(index.magnitude % UInt(palette.count))]
     }
     private var initials: String {
@@ -99,7 +149,7 @@ struct StatusPill: View {
     }
     private var tint: Color {
         if bill.status == .cancelled { return GP.secondary }
-        return bill.status == .collecting && !bill.allApproved ? GP.amber : GP.mint
+        return bill.status == .collecting && !bill.allApproved ? GP.amber : GP.sage
     }
     var body: some View {
         HStack(spacing: 6) {
@@ -119,7 +169,7 @@ struct EmptyPanel: View {
     var body: some View {
         Panel(padding: 24) {
             IconTile(symbol: symbol, size: 50).padding(.bottom, 5)
-            Text(title).font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(GP.display(22, relativeTo: .title3)).fixedSize(horizontal: false, vertical: true)
             Text(subtitle).font(.subheadline).foregroundStyle(GP.secondary)
                 .lineSpacing(4).fixedSize(horizontal: false, vertical: true)
         }
@@ -132,7 +182,7 @@ struct PageHeading: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Eyebrow(text: overline)
-            Text(title).font(.largeTitle.weight(.semibold)).tracking(-0.8)
+            Text(title).font(GP.display(34, relativeTo: .largeTitle)).tracking(-0.8)
                 .foregroundStyle(GP.text).fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
     }
@@ -168,16 +218,20 @@ struct IconTile: View {
 }
 
 extension View {
+    func gpAnimate<Value: Equatable>(_ value: Value) -> some View {
+        modifier(GPValueAnimation(value: value))
+    }
+
     func gpPage() -> some View {
-        self.foregroundStyle(GP.text)
+        self.font(GP.body()).foregroundStyle(GP.text)
             .background(GP.background.ignoresSafeArea())
             .toolbarBackground(GP.background, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
     }
     func gpField() -> some View {
         self.padding(.horizontal, 15).padding(.vertical, 14)
             .foregroundStyle(GP.text)
-            .background(GP.raised, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(GP.border))
+            .background(GP.raised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(GP.border))
     }
 }

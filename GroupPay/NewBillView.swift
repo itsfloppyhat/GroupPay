@@ -60,7 +60,7 @@ struct NewBillView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(spacing: 8) {
-                        ForEach(0..<3) { index in Capsule().fill(index <= step ? GP.mint : GP.raised).frame(height: 4) }
+                        ForEach(0..<3) { index in Capsule().fill(index <= step ? GP.mint : GP.surface).frame(height: 6).gpAnimate(step) }
                     }
                     PageHeading(overline: "Step \(step + 1) of 3 · \(["The receipt", "Your group", "Review"][step])", title: ["Start with the bill", "Everyone’s part", "Ready to share?"][step])
                     if step == 0 { receiptStep }
@@ -94,7 +94,7 @@ struct NewBillView: View {
                 .onChange(of: draft.baseTotalCents) { _, _ in totalVerified = false }
                 .onChange(of: category) { _, value in leaderTip = TipSelection(percent: value == .dining ? 20 : 0) }
                 .onChange(of: selectedGroupID) { _, _ in applySelectedGroup() }
-        }.preferredColorScheme(.dark).tint(GP.mint).interactiveDismissDisabled(store.busy || scanning)
+        }.preferredColorScheme(.light).tint(GP.mint).interactiveDismissDisabled(store.busy || scanning)
     }
     private var receiptStep: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -106,23 +106,23 @@ struct NewBillView: View {
                         .background(GP.mint.opacity(0.06), in: RoundedRectangle(cornerRadius: 28))
                         .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(GP.mint.opacity(0.12)))
                         .padding(.top, 8)
-                    Text("Bring your receipt").font(.title3.weight(.semibold))
+                    Text("Bring your receipt").font(GP.display(22, relativeTo: .title3))
                     Text("Dinner, groceries, or something shared.\nScan it, then check the details.")
-                        .font(.subheadline).foregroundStyle(GP.secondary).multilineTextAlignment(.center)
+                        .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary).multilineTextAlignment(.center)
                     Button { showCamera = true } label: { Label("Scan a receipt", systemImage: "camera") }.buttonStyle(PrimaryButton()).disabled(!ReceiptCamera.isSupported || scanning)
-                    PhotosPicker(selection: $photo, matching: .images) { Label("Choose a receipt photo", systemImage: "photo") }.font(.subheadline.bold()).disabled(scanning)
-                    if !ReceiptCamera.isSupported { Text("Camera unavailable. Choose a photo or try a sample receipt.").font(.caption).foregroundStyle(GP.secondary).multilineTextAlignment(.center) }
-                    if scanning { ProgressView("Reading your receipt…").font(.caption) }
+                    PhotosPicker(selection: $photo, matching: .images) { Label("Choose a receipt photo", systemImage: "photo") }.font(GP.body(15, weight: .bold, relativeTo: .subheadline)).disabled(scanning)
+                    if !ReceiptCamera.isSupported { Text("Camera unavailable. Choose a photo or try a sample receipt.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).multilineTextAlignment(.center) }
+                    if scanning { ProgressView("Reading your receipt…").font(GP.body(12, weight: .regular, relativeTo: .caption)) }
                 }.padding(24).frame(maxWidth: .infinity).background(GP.surface, in: RoundedRectangle(cornerRadius: 24))
                 HStack(spacing: 12) {
                     sampleButton("Dinner", symbol: "fork.knife", groceries: false)
                     sampleButton("Groceries", symbol: "basket", groceries: true)
                 }
-                Button("Enter a bill manually") { lines = [ReceiptLine()]; title = "" }.font(.subheadline).foregroundStyle(GP.secondary).frame(maxWidth: .infinity)
+                Button("Enter a bill manually") { lines = [ReceiptLine()]; title = "" }.font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary).frame(maxWidth: .infinity)
             } else {
                 Panel {
                     Eyebrow(text: "Receipt details")
-                    TextField("Restaurant or bill name", text: $title).font(.title3.weight(.semibold)).gpField()
+                    TextField("Restaurant or bill name", text: $title).font(GP.display(22, relativeTo: .title3)).gpField()
                     Picker("Category", selection: $category) { ForEach(BillCategory.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
                     HStack {
                         Text("ITEM")
@@ -134,28 +134,28 @@ struct NewBillView: View {
                             TextField("Item name", text: $line.name).accessibilityLabel("Item name")
                             TextField("0.00", text: $line.amount).accessibilityLabel("Item price in dollars").keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80)
                             Button { lines.removeAll { $0.id == line.id } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Remove \(line.name)")
-                        }.font(.subheadline).padding(.vertical, 9)
+                        }.font(GP.body(15, weight: .regular, relativeTo: .subheadline)).padding(.vertical, 9)
                         Divider()
                     }
-                    Button { lines.append(ReceiptLine()) } label: { Label("Add item", systemImage: "plus") }.font(.subheadline.bold())
-                    HStack { Text("Tax"); Spacer(); TextField("0.00", text: $tax).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 100) }.font(.subheadline)
+                    Button { lines.append(ReceiptLine()) } label: { Label("Add item", systemImage: "plus") }.font(GP.body(15, weight: .bold, relativeTo: .subheadline))
+                    HStack { Text("Tax"); Spacer(); TextField("0.00", text: $tax).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 100) }.font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                     Divider()
                     HStack { Text("Before tips and fee").bold(); Spacer(); Text(Money.string(cents: draft.baseTotalCents)).font(.title3.bold()).foregroundStyle(GP.mint) }
                 }
                 if scannedTipCents > 0 {
-                    Text("The receipt includes \(Money.string(cents: scannedTipCents)) in tip. It isn’t added twice: each person sets their own tip before approving. For a tip already agreed with the restaurant, use exact tip amounts that add up to it.").font(.caption).foregroundStyle(GP.amber)
+                    Text("The receipt includes \(Money.string(cents: scannedTipCents)) in tip. It isn’t added twice: each person sets their own tip before approving. For a tip already agreed with the restaurant, use exact tip amounts that add up to it.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.amber)
                 }
                 if totalMismatch {
                     Panel {
-                        Label("Check the total", systemImage: "exclamationmark.triangle").foregroundStyle(GP.amber).font(.headline)
-                        Text("Receipt: \(Money.string(cents: detectedTotal ?? 0)). Your total: \(Money.string(cents: draft.baseTotalCents)). Check for missed items or discounts before continuing.").font(.subheadline).foregroundStyle(GP.secondary)
-                        Toggle("I verified the corrected total", isOn: $totalVerified).font(.subheadline)
+                        Label("Check the total", systemImage: "exclamationmark.triangle").foregroundStyle(GP.amber).font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                        Text("Receipt: \(Money.string(cents: detectedTotal ?? 0)). Your total: \(Money.string(cents: draft.baseTotalCents)). Check for missed items or discounts before continuing.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
+                        Toggle("I verified the corrected total", isOn: $totalVerified).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                     }
                 }
                 if !rawText.isEmpty {
-                    DisclosureGroup("Original receipt text") { Text(rawText).font(.caption.monospaced()).foregroundStyle(GP.secondary).textSelection(.enabled).padding(.top, 10) }.font(.subheadline).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
+                    DisclosureGroup("Original receipt text") { Text(rawText).font(.caption.monospaced()).foregroundStyle(GP.secondary).textSelection(.enabled).padding(.top, 10) }.font(GP.body(15, weight: .regular, relativeTo: .subheadline)).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
                 }
-                Text("Check prices, discounts, and tax before continuing. Everyone chooses their own tip when approving.").font(.caption).foregroundStyle(GP.secondary)
+                Text("Check prices, discounts, and tax before continuing. Everyone chooses their own tip when approving.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
             }
         }
     }
@@ -163,8 +163,8 @@ struct NewBillView: View {
         Button { sample(groceries: groceries) } label: {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: symbol).font(.title3).foregroundStyle(GP.mint)
-                Text(title).font(.subheadline.bold()).foregroundStyle(.white)
-                Text("Sample receipt").font(.caption).foregroundStyle(GP.secondary)
+                Text(title).font(GP.body(15, weight: .bold, relativeTo: .subheadline)).foregroundStyle(GP.text)
+                Text("Sample receipt").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(GP.surface, in: RoundedRectangle(cornerRadius: 20))
         }
     }
@@ -176,7 +176,7 @@ struct NewBillView: View {
                         Text("One-time split").tag(nil as UUID?)
                         ForEach(store.ownedGroups) { Text($0.name).tag(Optional($0.id)) }
                     }.tint(GP.mint)
-                    Text("Group members accept one invitation, then future bills arrive automatically.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Group members accept one invitation, then future bills arrive automatically.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
             }
             Panel {
@@ -184,52 +184,52 @@ struct NewBillView: View {
                 ForEach(Array(members.indices), id: \.self) { index in
                     HStack {
                         Avatar(name: index == 0 ? store.name : members[index].name, index: index)
-                        if index == 0 { Text(store.name == "You" ? "You" : "\(store.name) (you)").font(.subheadline); Spacer(); Text("Leader").font(.caption).foregroundStyle(GP.mint) }
+                        if index == 0 { Text(store.name == "You" ? "You" : "\(store.name) (you)").font(GP.body(15, weight: .regular, relativeTo: .subheadline)); Spacer(); Text("Leader").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.mint) }
                         else if selectedGroupID != nil {
-                            Text(members[index].name).font(.subheadline)
+                            Text(members[index].name).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                             Spacer()
                         } else {
-                            TextField("Their name", text: $members[index].name).textContentType(.name).font(.subheadline)
+                            TextField("Their name", text: $members[index].name).textContentType(.name).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                             Button { let id = members[index].id; members.remove(at: index); for i in lines.indices { lines[i].assigneeIDs.removeAll { $0 == id } } } label: { Image(systemName: "minus.circle").foregroundStyle(GP.secondary).frame(width: 44, height: 44).contentShape(Rectangle()) }.accessibilityLabel("Remove person")
                         }
                     }.padding(.vertical, 5)
                 }
                 if selectedGroupID == nil {
-                    Button { members.append(BillMember(name: "")) } label: { Label("Add a person", systemImage: "person.badge.plus") }.font(.subheadline.bold()).disabled(members.count >= 50)
+                    Button { members.append(BillMember(name: "")) } label: { Label("Add a person", systemImage: "person.badge.plus") }.font(GP.body(15, weight: .bold, relativeTo: .subheadline)).disabled(members.count >= 50)
                     if !store.friends.isEmpty {
                         Menu("Add a saved friend") {
                             ForEach(store.friends.filter { friend in !members.contains(where: { $0.accountID == friend.id }) }) { friend in
                                 Button(friend.name) { addFriend(friend) }
                             }
-                        }.font(.subheadline.bold()).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(members.count >= 50)
+                        }.font(GP.body(15, weight: .bold, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(minHeight: 44).disabled(members.count >= 50)
                     }
-                    Text("You’ll send invitations after creating this one-time split. Choose a saved group to reuse an accepted invitation.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("After creating this split, send app invitations or personal guest webpages. Guests can approve without downloading Group Pay.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 } else {
-                    Text("Everyone in this group can see its bills. Members who accepted the group invitation don’t need another link.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Everyone in this group can see its bills. Members who accepted the group invitation don’t need another link.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
             }
             Panel {
                 Eyebrow(text: "How to split")
                 Picker("Split method", selection: $method) { ForEach(SplitMethod.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.menu).tint(GP.mint)
                 if method == .equal {
-                    Text("Split the subtotal equally. Tax and the 1% fee are added, then each person chooses their own tip.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("Split the subtotal equally. Tax and the 1% fee are added, then each person chooses their own tip.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                 } else if method == .custom {
-                    Text("Assign each person’s food or item subtotal. Tax, personal tips, and the fee are added separately.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Assign each person’s food or item subtotal. Tax, personal tips, and the fee are added separately.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     ForEach(Array(members.enumerated()), id: \.element.id) { index, member in
                         HStack {
-                            Text(index == 0 ? store.name : member.name).font(.subheadline)
+                            Text(index == 0 ? store.name : member.name).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                             Spacer()
                             TextField("0.00", text: Binding(get: { customAmounts[member.id] ?? "" }, set: { customAmounts[member.id] = $0 }))
                                 .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 100).gpField()
                         }
                     }
                     let assigned = members.reduce(0) { $0 + min(Bill.maximumCents, max(0, Money.cents(from: customAmounts[$1.id] ?? "0") ?? 0)) }
-                    Text("\(Money.string(cents: draft.subtotalCents - assigned)) left to assign").font(.caption.bold()).foregroundStyle(assigned == draft.subtotalCents ? GP.mint : GP.amber)
+                    Text("\(Money.string(cents: draft.subtotalCents - assigned)) left to assign").font(GP.body(12, weight: .bold, relativeTo: .caption)).foregroundStyle(assigned == draft.subtotalCents ? GP.mint : GP.amber)
                 } else {
-                    Text("Select who shares each item. Tax and the fee follow those portions; tips are personal.").font(.caption).foregroundStyle(GP.secondary)
+                    Text("Select who shares each item. Tax and the fee follow those portions; tips are personal.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     ForEach($lines) { $line in
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack { Text(line.name).font(.subheadline.bold()); Spacer(); Text(Money.string(cents: Money.cents(from: line.amount) ?? 0)).font(.subheadline) }
+                            HStack { Text(line.name).font(GP.body(15, weight: .bold, relativeTo: .subheadline)); Spacer(); Text(Money.string(cents: Money.cents(from: line.amount) ?? 0)).font(GP.body(15, weight: .regular, relativeTo: .subheadline)) }
                             ViewThatFits(in: .horizontal) {
                                 HStack { assignmentButtons($line) }
                                 VStack(alignment: .leading) { assignmentButtons($line) }
@@ -239,14 +239,14 @@ struct NewBillView: View {
                 }
             }
             Panel {
-                Label("Repeat this bill", systemImage: "repeat").font(.headline)
+                Label("Repeat this bill", systemImage: "repeat").font(GP.body(17, weight: .semibold, relativeTo: .headline))
                 Picker("Repeat", selection: $recurrence) { ForEach(Recurrence.allCases) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
                 if recurrence != .none {
-                    DatePicker("Next due", selection: $nextDue, in: Date.now..., displayedComponents: .date).font(.subheadline)
-                    Text("Start each cycle when you’re ready. Everyone approves again.").font(.caption).foregroundStyle(GP.secondary)
+                    DatePicker("Next due", selection: $nextDue, in: Date.now..., displayedComponents: .date).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
+                    Text("Start each cycle when you’re ready. Everyone approves again.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
             }
-            if let validation = draft.validationMessage { Text(validation).font(.caption).foregroundStyle(GP.amber) }
+            if let validation = draft.validationMessage { Text(validation).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.amber) }
         }
     }
     @ViewBuilder private func assignmentButtons(_ line: Binding<ReceiptLine>) -> some View {
@@ -257,7 +257,7 @@ struct NewBillView: View {
                 else { line.wrappedValue.assigneeIDs.append(member.id) }
             } label: {
                 Text(index == 0 ? "You" : member.name.isEmpty ? "Person \(index + 1)" : member.name)
-                    .font(.caption.bold()).padding(.horizontal, 11).padding(.vertical, 9).frame(minWidth: 44, minHeight: 44)
+                    .font(GP.body(12, weight: .bold, relativeTo: .caption)).padding(.horizontal, 11).padding(.vertical, 9).frame(minWidth: 44, minHeight: 44)
                     .foregroundStyle(selected ? GP.background : GP.secondary).background(selected ? GP.mint : GP.raised, in: Capsule())
             }.accessibilityAddTraits(selected ? .isSelected : [])
         }
@@ -269,23 +269,23 @@ struct NewBillView: View {
                     Image(systemName: category.systemImage).foregroundStyle(GP.mint)
                         .frame(width: 40, height: 40).background(GP.mint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(title).font(.headline)
-                        Text(category.rawValue).font(.caption).foregroundStyle(GP.secondary)
+                        Text(title).font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                        Text(category.rawValue).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     }
                     Spacer(minLength: 0)
                 }
-                Text(Money.string(cents: draft.totalCents)).font(.system(size: reviewTotalSize, weight: .medium, design: .rounded)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.7).padding(.top, 4)
-                Text("\(method.rawValue) · \(recurrence.rawValue) · USD").font(.caption).foregroundStyle(GP.secondary)
-                Text("Includes estimated personal tips and the 1% fee. The total updates as everyone chooses their tip.").font(.caption).foregroundStyle(GP.secondary)
-                HStack { Text("Personal tips"); Spacer(); Text(Money.string(cents: draft.totalTipCents)) }.font(.subheadline)
-                HStack { Text("Group Pay fee · 1%"); Spacer(); Text(Money.string(cents: draft.feeCents)) }.font(.subheadline)
+                Text(Money.string(cents: draft.totalCents)).font(.custom("Caprasimo-Regular", fixedSize: reviewTotalSize)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.7).padding(.top, 4)
+                Text("\(method.rawValue) · \(recurrence.rawValue) · USD").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
+                Text("Includes estimated personal tips and the 1% fee. The total updates as everyone chooses their tip.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
+                HStack { Text("Personal tips"); Spacer(); Text(Money.string(cents: draft.totalTipCents)) }.font(GP.body(15, weight: .regular, relativeTo: .subheadline))
+                HStack { Text("Group Pay fee · 1%"); Spacer(); Text(Money.string(cents: draft.feeCents)) }.font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                 Divider()
                 ForEach(Array(draft.members.enumerated()), id: \.element.id) { index, member in
                     HStack {
                         Avatar(name: member.name, index: index)
-                        Text(member.name).font(.subheadline)
+                        Text(member.name).font(GP.body(15, weight: .regular, relativeTo: .subheadline))
                         Spacer()
-                        Text(Money.string(cents: draft.shares[member.id] ?? 0)).font(.subheadline.bold())
+                        Text(Money.string(cents: draft.shares[member.id] ?? 0)).font(GP.body(15, weight: .bold, relativeTo: .subheadline))
                     }
                 }
             }
@@ -296,27 +296,27 @@ struct NewBillView: View {
                 }
             }
             Panel {
-                Text("What happens next").font(.headline)
+                Text("What happens next").font(GP.body(17, weight: .semibold, relativeTo: .headline))
                 VStack(alignment: .leading, spacing: 18) {
                     nextStep("1", title: selectedGroupID == nil ? "Invite your group" : "Share with your group", detail: "Everyone receives their own amount, including a tip they can adjust.")
                     nextStep("2", title: "Everyone approves", detail: "Each person chooses their tip and approves their total.")
                     nextStep("3", title: "Create one test card", detail: "You confirm once the whole group is ready. Only you receive the card.")
                 }.padding(.vertical, 4)
                 Divider()
-                Toggle("I reviewed the receipt and everyone’s portion", isOn: $reviewed).font(.subheadline).tint(GP.mint)
+                Toggle("I reviewed the receipt and everyone’s portion", isOn: $reviewed).font(GP.body(15, weight: .regular, relativeTo: .subheadline)).tint(GP.mint)
             }
-            if !store.connected { Text("Sign in from Profile to create this split and invite your group.").font(.subheadline).foregroundStyle(GP.amber) }
-            Text("Creating this split also approves your portion.").font(.caption).foregroundStyle(GP.secondary)
-            Text("Test mode · No real money").font(.caption).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.top, 4)
+            if !store.connected { Text("Sign in from Profile to create this split and invite your group.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.amber) }
+            Text("Creating this split also approves your portion.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
+            Text("Test mode · No real money").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.top, 4)
         }
     }
     private func nextStep(_ number: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(number).font(.caption.weight(.semibold)).foregroundStyle(GP.mint)
+            Text(number).font(GP.body(12, weight: .semibold, relativeTo: .caption)).foregroundStyle(GP.mint)
                 .frame(width: 26, height: 26).background(GP.mint.opacity(0.08), in: Circle())
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(GP.secondary)
+                Text(title).font(GP.body(15, weight: .medium, relativeTo: .subheadline))
+                Text(detail).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
             }
         }
     }

@@ -28,10 +28,10 @@ struct TeamAccessView: View {
                         Panel(padding: 24) {
                             IconTile(symbol: "person.2.fill", size: 52)
                             Text("Connect with your team.")
-                                .font(.title2.weight(.semibold))
+                                .font(GP.display(26, relativeTo: .title2))
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("Enter the code from your team organizer to connect your group’s test cards.")
-                                .font(.subheadline).foregroundStyle(GP.secondary)
+                                .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             SecureField("Team access code", text: $accessCode)
                                 .textInputAutocapitalization(.never)
@@ -44,7 +44,7 @@ struct TeamAccessView: View {
                                 .gpField()
                             if savedTeamConnection {
                                 Text("Your code is saved securely. Leave this blank to check your connection.")
-                                    .font(.caption).foregroundStyle(GP.secondary)
+                                    .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Button(action: joinTeam) {
@@ -55,20 +55,20 @@ struct TeamAccessView: View {
                             }.buttonStyle(PrimaryButton()).disabled(!canJoin)
                             if let status {
                                 Label(status, systemImage: "checkmark.circle.fill")
-                                    .font(.subheadline).foregroundStyle(GP.mint)
+                                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                                     .fixedSize(horizontal: false, vertical: true)
                             } else if savedTeamConnection && service.enabled {
                                 Label("Your team access is ready.", systemImage: "checkmark.circle.fill")
-                                    .font(.subheadline).foregroundStyle(GP.mint)
+                                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                             }
                             if let error {
                                 Label(error, systemImage: "exclamationmark.circle")
-                                    .font(.subheadline).foregroundStyle(GP.amber)
+                                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.amber)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         Text("Your code stays securely on this device. Joining doesn’t create a card or move money.")
-                            .font(.caption).foregroundStyle(GP.secondary)
+                            .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
                         EmptyPanel(symbol: "person.2", title: "Team access isn’t available yet.",
@@ -77,7 +77,7 @@ struct TeamAccessView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         TestModeBadge()
                         Text("All cards use test funds. No real money moves.")
-                            .font(.caption).foregroundStyle(GP.secondary)
+                            .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(22)
@@ -91,7 +91,7 @@ struct TeamAccessView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
         .tint(GP.mint)
         .interactiveDismissDisabled(busy)
         .onDisappear { accessCode = "" }

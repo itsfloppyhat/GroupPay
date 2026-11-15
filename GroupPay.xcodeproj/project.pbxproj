@@ -7,19 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00566636ACBEE95BEEC13ADE /* Figtree-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FA4504BB4C2236F441CFB462 /* Figtree-Bold.ttf */; };
 		0BBD34B655D64D87165628EE /* NewBillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CADA1A8A705908E8FCC57D99 /* NewBillView.swift */; };
 		0BDE682424EAE1475343C341 /* SandboxIssuanceRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */; };
 		0DC6E6CB0A42A6748DEB690D /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4861FCB408C852C40A7C64 /* PeopleView.swift */; };
 		135A50CF343985D58A630A24 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86C384643AB6F58170F1C47 /* ContentView.swift */; };
 		22F5E87AC3A07401EB00BBBE /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A6FB61169DAA29A9EB21147 /* Models.swift */; };
+		258BB2A8C216A5D4EE7D2A50 /* SimulatorDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF40416580855AEF0956E2C1 /* SimulatorDemo.swift */; };
 		30ED997A215C1B54CD5043F4 /* PersonalTipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 470831E93FE577577A7FBDCA /* PersonalTipView.swift */; };
 		38725A1AF59CF9E7368A909F /* GroupPayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614496DD3A8E59DD41B165AE /* GroupPayApp.swift */; };
 		6309B72E57DC433ED45613FA /* CloudService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */; };
 		645308E1E9AF77CA7B6FB508 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC21687612EC19E16494AFFB /* Design.swift */; };
 		71D78A8BB02500CEB041707D /* TeamAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E12EFD039614A66880F2968A /* TeamAccessView.swift */; };
+		8D8236DBB68B070A30F0761E /* Figtree-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 77A403C93A3BF543C55023F9 /* Figtree-SemiBold.ttf */; };
+		949E9F2D5361FCB7AD214C9D /* OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 311AD7780E8020BBA26C878E /* OFL.txt */; };
+		A995A3AAE2041EA318C6CE2B /* Caprasimo-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 535014CB15D9CFB4E0EE1C8B /* Caprasimo-Regular.ttf */; };
 		B449D8EE0929CD1C234D9D66 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FECC86FB5DA8F10FB920211 /* AppStore.swift */; };
+		BE6EEEB59E8C4F56C3B73D2C /* guest_web in Resources */ = {isa = PBXBuildFile; fileRef = EC61C61EFFACD1E19392A123 /* guest_web */; };
 		C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */; };
 		C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9227BFB34C0358647FF51C /* SandboxCardService.swift */; };
+		C8611A81C18915687826B82B /* Figtree-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 267C8B1FE791EF0AD06409BD /* Figtree-Regular.ttf */; };
 		D38994815FDBCB17C58636F9 /* FriendsGroups.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2C0C93DF73B56D85B952374 /* FriendsGroups.swift */; };
 		DFF4CC7774028A9C1D612287 /* BillDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79A28EB4F2FA1B302FD4C252 /* BillDetailView.swift */; };
 /* End PBXBuildFile section */
@@ -27,20 +34,27 @@
 /* Begin PBXFileReference section */
 		0A395D442101948243C13891 /* GroupPay.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GroupPay.entitlements; sourceTree = "<group>"; };
 		1A6FB61169DAA29A9EB21147 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		267C8B1FE791EF0AD06409BD /* Figtree-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Figtree-Regular.ttf"; sourceTree = "<group>"; };
+		311AD7780E8020BBA26C878E /* OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = OFL.txt; sourceTree = "<group>"; };
 		470831E93FE577577A7FBDCA /* PersonalTipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalTipView.swift; sourceTree = "<group>"; };
 		4A9227BFB34C0358647FF51C /* SandboxCardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxCardService.swift; sourceTree = "<group>"; };
+		535014CB15D9CFB4E0EE1C8B /* Caprasimo-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Caprasimo-Regular.ttf"; sourceTree = "<group>"; };
 		614496DD3A8E59DD41B165AE /* GroupPayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupPayApp.swift; sourceTree = "<group>"; };
+		77A403C93A3BF543C55023F9 /* Figtree-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Figtree-SemiBold.ttf"; sourceTree = "<group>"; };
 		79A28EB4F2FA1B302FD4C252 /* BillDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillDetailView.swift; sourceTree = "<group>"; };
 		9A4861FCB408C852C40A7C64 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		9FECC86FB5DA8F10FB920211 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
 		A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptScanner.swift; sourceTree = "<group>"; };
 		A91FD74DA1B1087A5BEAF6F4 /* CloudService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudService.swift; sourceTree = "<group>"; };
 		B86C384643AB6F58170F1C47 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		BF40416580855AEF0956E2C1 /* SimulatorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorDemo.swift; sourceTree = "<group>"; };
 		C2C0C93DF73B56D85B952374 /* FriendsGroups.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsGroups.swift; sourceTree = "<group>"; };
 		C34A73F6BE77DB3373AF36C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CADA1A8A705908E8FCC57D99 /* NewBillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBillView.swift; sourceTree = "<group>"; };
 		E12EFD039614A66880F2968A /* TeamAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamAccessView.swift; sourceTree = "<group>"; };
 		E6820F79EAF5B9CE1785C884 /* GroupPay.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = GroupPay.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC61C61EFFACD1E19392A123 /* guest_web */ = {isa = PBXFileReference; lastKnownFileType = folder; name = guest_web; path = sandbox_backend/guest_web; sourceTree = SOURCE_ROOT; };
+		FA4504BB4C2236F441CFB462 /* Figtree-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Figtree-Bold.ttf"; sourceTree = "<group>"; };
 		FC21687612EC19E16494AFFB /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
 		FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandboxIssuanceRequest.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -57,6 +71,7 @@
 		D3C379091DE7F937527C714B = {
 			isa = PBXGroup;
 			children = (
+				EC61C61EFFACD1E19392A123 /* guest_web */,
 				D5FF06FA51DA954B29ACCF63 /* GroupPay */,
 				558EB9EAB1E50EB325BA8C5C /* Products */,
 			);
@@ -81,9 +96,23 @@
 				A28ABDC63C873DE7972C1CA9 /* ReceiptScanner.swift */,
 				4A9227BFB34C0358647FF51C /* SandboxCardService.swift */,
 				FDB830F01447722BF81E0B3E /* SandboxIssuanceRequest.swift */,
+				BF40416580855AEF0956E2C1 /* SimulatorDemo.swift */,
 				E12EFD039614A66880F2968A /* TeamAccessView.swift */,
+				FA7679D0174338D83515B6C4 /* Fonts */,
 			);
 			path = GroupPay;
+			sourceTree = "<group>";
+		};
+		FA7679D0174338D83515B6C4 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				535014CB15D9CFB4E0EE1C8B /* Caprasimo-Regular.ttf */,
+				FA4504BB4C2236F441CFB462 /* Figtree-Bold.ttf */,
+				267C8B1FE791EF0AD06409BD /* Figtree-Regular.ttf */,
+				77A403C93A3BF543C55023F9 /* Figtree-SemiBold.ttf */,
+				311AD7780E8020BBA26C878E /* OFL.txt */,
+			);
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -94,6 +123,7 @@
 			buildConfigurationList = 07C6D46BBC27B20F6B2408DC /* Build configuration list for PBXNativeTarget "GroupPay" */;
 			buildPhases = (
 				8659466951DA393DA32380CE /* Sources */,
+				0ED28CB22B782ACA1F8B23FA /* Resources */,
 			);
 			buildRules = (
 			);
@@ -140,6 +170,22 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		0ED28CB22B782ACA1F8B23FA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A995A3AAE2041EA318C6CE2B /* Caprasimo-Regular.ttf in Resources */,
+				00566636ACBEE95BEEC13ADE /* Figtree-Bold.ttf in Resources */,
+				C8611A81C18915687826B82B /* Figtree-Regular.ttf in Resources */,
+				8D8236DBB68B070A30F0761E /* Figtree-SemiBold.ttf in Resources */,
+				949E9F2D5361FCB7AD214C9D /* OFL.txt in Resources */,
+				BE6EEEB59E8C4F56C3B73D2C /* guest_web in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		8659466951DA393DA32380CE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -159,6 +205,7 @@
 				C617CF9595DCC7F6ED981493 /* ReceiptScanner.swift in Sources */,
 				C81C64107A883C0D5A4DB38D /* SandboxCardService.swift in Sources */,
 				0BDE682424EAE1475343C341 /* SandboxIssuanceRequest.swift in Sources */,
+				258BB2A8C216A5D4EE7D2A50 /* SimulatorDemo.swift in Sources */,
 				71D78A8BB02500CEB041707D /* TeamAccessView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -227,7 +274,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -285,7 +332,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;

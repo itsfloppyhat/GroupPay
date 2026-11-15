@@ -1,129 +1,156 @@
-# Group Pay
+<p align="center">
+  <img src="docs/assets/group-pay-banner.svg" alt="Group Pay — One bill. Everyone’s part." width="100%" />
+</p>
 
-A native SwiftUI group-payment prototype. Scan a receipt, split the total, invite your group, collect approvals, and create a virtual card using local simulation or Marqeta's sandbox. All funds are simulated.
+<p align="center">
+  <strong>Shared plans. Clear portions. One group card.</strong><br />
+  A native iOS prototype for roommates, friends, and the everyday costs they share.
+</p>
 
-## What works
+<p align="center">
+  <img alt="iOS 26 or later" src="https://img.shields.io/badge/iOS-26%2B-201E1D?style=flat-square" />
+  <img alt="SwiftUI" src="https://img.shields.io/badge/Built_with-SwiftUI-8C491A?style=flat-square" />
+  <img alt="CloudKit" src="https://img.shields.io/badge/Sync-CloudKit-56633F?style=flat-square" />
+  <img alt="Simulated money" src="https://img.shields.io/badge/Money-Simulated-C67139?style=flat-square" />
+</p>
 
-- Native multipage document camera and photo import, using on-device Vision text recognition. Restaurant and grocery sample receipts and manual entry are included.
-- Editable receipt review, tax, OCR total reconciliation, and exact integer-cent calculations in USD.
-- Scanned receipts suggest a category conservatively: explicit dining context can select Dining, while retail order summaries and unknown scans select Other with a 0% starting tip. Category remains editable before sharing; manually selecting Dining still defaults to 20%.
-- Equal splits, custom subtotal amounts, or item assignment (including shared items). Tax follows the subtotal allocation. Each person chooses their own tip with a slider or exact amount; dining defaults to 20% of their food subtotal, other categories to 0%.
-- A 1% Group Pay fee on food plus tax, excluding tips. Total contributions include the fee; the merchant card receives only food, tax, and tips. Fees and contributions are simulated accounting, not real collections.
-- Add friends directly from People before creating any bill. A private friend invitation saves both people after the recipient confirms. Reusable groups share future bills after a separate, one-time group invitation.
-- Separate iCloud identities and invite-only CloudKit sharing. Participants accept an Apple sharing invitation on their own device and claim their named portion.
-- Individual approvals; only the leader can confirm once everyone has joined and approved.
-- The leader can cancel a split before card creation starts: open its details, tap **Cancel split**, and confirm. Cancellation syncs to invitees, removes the split from active bills and approval requests, and preserves a collapsed **Cancelled splits** record. Cancelled splits cannot be approved, issued, paid, or restarted; earlier recurring payments remain in history. Issuing, funded, and paid bills cannot be cancelled through this action.
-- Only the leader sees card details. Shared bills contain status and amounts; card metadata is stored separately in the leader’s private iCloud records. Everyone receives card-ready status updates. Local mock cards support simulated payment and history.
-- Optional Marqeta sandbox issuance through a Python backend on this Mac or Cloud Run: creates an active virtual card and funds its isolated test account for the receipt plus personal tips, excluding the fee. Provider credentials stay on the backend; the app stores only its team access code in Keychain. Interrupted requests resume the same card and funding order.
-- Weekly/monthly schedules. The leader starts each cycle; participant approvals reset and the prior card is discarded. No automatic funding. Authorized local reminders prompt the leader at the next due date.
-- Real CloudKit background-push registration plus local update banners, foreground refresh, and an inbox of pending approvals.
-- Private data stays in the owner's private CloudKit database and invitees' shared databases. No public database or public-read share links.
-- Evergreen and mint Home, Inbox, Cards, People, Profile, creation, receipt, and bill-detail screens with native artwork, scalable typography, and concise customer-facing messages. An explicitly read-only preview is available without iCloud. Team access is available in Profile; additional connection controls live under Advanced settings in Debug builds.
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#try-it">Try it</a> ·
+  <a href="docs/DEVELOPMENT.md">Development guide</a> ·
+  <a href="sandbox_backend/cloud/README.md">Cloud backend</a>
+</p>
 
-## Requirements and opening
+## One bill. Everyone’s part.
 
-Open `GroupPay.xcodeproj` and select the **GroupPay** scheme.
+A grocery run for the house. Dinner with friends. The internet bill that comes around every month. Group Pay gives everyone a clear view of their share and collects approvals before the organizer creates a group card.
 
-- Stable Xcode 27.2, iOS 27.2 SDK, Swift 6 language mode.
-- Minimum deployment target **iOS 26.0** for both physical devices and simulators. No beta APIs.
-- Bundle ID: `com.itsfloppyhat.GroupPay`.
-- Developer team: Matthew Lucas (`FYWW2S89N3`). Change this in `project.yml` when using a different team.
-- CloudKit container: `iCloud.com.itsfloppyhat.GroupPay`.
+**This is a working prototype with simulated money.** It supports local mock cards and Marqeta sandbox card issuance. It does not charge people, hold their funds, or pay real merchants.
 
-The project is generated with XcodeGen. After changing `project.yml`, run `xcodegen generate`. The generated Xcode project, Info.plist, and scheme are committed source artifacts; no dependencies need downloading.
+## How it works
 
-## Test on two real accounts
+1. **Bring the bill.** Scan a receipt, import a photo, or enter the amount. Review the subtotal, tax, and items before sharing.
+2. **Choose your people.** Add participants or pick saved friends and groups. Split equally, enter custom amounts, or assign individual items.
+3. **Review and approve.** Each person sees their portion, chooses their tip, and approves. App participants use private iCloud sharing; guests can use a personal webpage.
+4. **Create the test card.** Once everyone has joined and approved, the organizer confirms. The card covers the purchase and tips; only the organizer sees its details.
 
-1. In Xcode, select your developer team and automatic signing. iCloud/CloudKit, Push Notifications, CloudKit sharing, and background remote notifications are already configured. A signed development build was verified with the Matthew Lucas team after accepting Apple's updated program agreement.
-2. Install the same development build on two devices running iOS 26.0 or later, each signed into a different iCloud account. Devices must be registered for the development profile. Enable iCloud Drive and use the same CloudKit development environment on both devices.
-3. Open Profile, enter your display name, connect iCloud, and enable notifications on both devices.
-4. On the leader’s device, connect **Profile → Team access** for hosted test cards. Start a split, scan/import a receipt or enter one manually, review food and tax, and add the other person. Choose equal, custom subtotal, or item allocation. On Review, adjust your own tip and create the split; this approves your portion.
-5. Tap **Invite your group** and use Apple’s sharing interface to send the first private invitation. The recipient accepts it, chooses their name, adjusts their personal tip, and approves the exact total including the 1% fee. Saving another person’s tip does not reset your approval or change your fee.
-6. On the leader’s device, confirm after everyone approves. The leader sees the funded card; the participant sees only card-ready status. With hosted cards the bill remains unpaid because merchant transaction simulation is not yet implemented. Local mock cards retain **Make a test payment**.
-7. You can add friends **before step 4**, without a bill: open **People → Add friend**, enter your name and your friend’s name, and create/share the private invitation. Your friend opens it, then confirms **Add friend** in People. Both accounts save the connection on sync. Pending invitations can be shared again or cancelled. Alternatively, save someone under **People you’ve split with** after an earlier bill. Create a named group, select that friend, and use **Invite or manage group** to send the group’s one-time invitation. Adding a friend does not grant access to any bills or groups.
-8. After the friend accepts the group invitation, start another split and choose the **Saved group**. All selected members are already assigned to their iCloud identities and future bills inherit group access. No new text/link is needed for each bill. Group membership is fixed for this version; create another group for a different set of people. Only the organizer creates bills under their group.
-9. For a locally paid recurring bill, start the next cycle and collect fresh approvals.
+Local mock cards include a simulated payment step. Marqeta sandbox cards support issuance and initial test funding; merchant transactions and subsequent balance updates are not implemented.
 
-**Both people need build 3 or later for standalone friend invitations.** Build 4 fixes estimated-tax labels and subtotal recovery in scanned order summaries. New pricing uses `GroupPayBillV2` so old builds cannot approve a total without its tips/fee. Existing bills retain their original pricing and recovery keys. Leader cards previously embedded in legacy shared records are moved into unshared sibling records when the updated leader app fetches them.
+## Built for the way groups spend
 
-Development schema is created by the first successful device write. Before TestFlight/App Store builds, deploy `GroupPayBill`, `GroupPayBillV2`, `GroupPayGroup`, `GroupPayFriend`, `GroupPayFriendInvitation`, `GroupPayFriendReceipt`, and `GroupPayPrivateCard` (each `payload: Bytes`, `updatedBy: String`) to Production in CloudKit Console and validate production shares/subscriptions. All participants must use builds targeting the same CloudKit environment. Friend completion receipts remain private and prevent a previously accepted invitation from restoring a removed friend on refresh or another device.
+| Feature | What you can do |
+| --- | --- |
+| **Receipts and groceries** | Scan multiple pages or import a photo, then correct the on-device OCR result before creating a split. |
+| **Flexible portions** | Split equally, use custom subtotal amounts, or assign items—including shared items—with exact-cent allocation. |
+| **Personal tips** | Adjust your own percentage or exact amount. Dining starts at 20% of your subtotal; other categories start at 0%. |
+| **Friends and groups** | Connect in People before creating a bill. Accepted, reusable group invitations let future bills inherit access. |
+| **Guest approvals** | Send a named participant a seven-day web link. They can review and approve without installing the app or creating an account. |
+| **Recurring expenses** | Set a weekly or monthly schedule. The organizer starts each cycle, and everyone approves again. |
+| **Status and cancellation** | Follow approvals in Inbox, receive bill-update notifications, or cancel before card creation starts. |
+| **Private card details** | Everyone sees card-ready status; card metadata stays in the organizer’s private iCloud records. |
 
-## Notification behavior
+The interface uses warm cream and terracotta, **Caprasimo** headings, and **Figtree** body text, with scalable type and support for reduced motion.
 
-Build 5 repairs private/shared CloudKit subscriptions when connecting or accepting a share. Bill records use visible server notifications so a closed app no longer depends on a silent push waking it before it can show an alert. Background alerts use generic bill-update copy and open Inbox; the exact amount appears in the bill. Friend/group synchronization remains silent. Foreground refresh and push handling share a serialized notification ledger, produce the recipient’s amount/status notice, and acknowledge a revision only after successful enqueue. Silent background synchronization cannot consume a pending bill alert or create a second local copy of the server banner. Card notifications never include card digits.
+### Clear amounts, down to the cent
 
-The app refreshes every 30 seconds while active, with overlapping refreshes suppressed. Inbox also has a refresh button and shows sync failures instead of claiming everything is caught up. **Profile → Notifications → Send test notification** checks local alert presentation only; it does not test CloudKit delivery. With iPhone Mirroring, also check the app’s **Show on Mac** setting and Mac notification controls. iOS can still defer/coalesce notifications, and Focus, user settings, or network restrictions can affect delivery. Weekly/monthly due reminders are scheduled locally for the leader after notification permission is granted.
+The current app applies a **1% fee to subtotal plus tax, excluding tips**. Contributions include the fee; the test card receives only subtotal, tax, and tips. There is no additional fixed charge in this build. All fees are simulated accounting.
 
-## Marqeta sandbox on this Mac
+For example, a $120 purchase with no tax or tip produces $121.20 in total contributions: four equal portions of $30.30 and a $120 test card.
 
-1. Create a sandbox in your [Marqeta developer account](https://app.marqeta.com/). Wait for its API credentials to become available.
-2. Run `python3 sandbox_backend/setup.py --credentials` from this repository. Enter the sandbox URL, application token, and admin access token in the local terminal. Token entry is hidden; `.env` is private and excluded from Git.
-3. Run `python3 sandbox_backend/server.py` and leave it running.
-4. Build and install the Debug app in the simulator with normal Xcode signing enabled (do not set `CODE_SIGNING_ALLOWED=NO`; the simulator needs its generated Keychain entitlements). Run `python3 sandbox_backend/configure_simulator.py --device <simulator-UDID>` to save its local connection token without copying secrets into chat. With exactly one running simulator, omit `--device`.
-5. In the Debug build of Group Pay, open **Profile → Advanced settings → Card connection → Save & check connection**. Choose **Create $10 test card**. This uses explicitly fictional participants, so it works without iCloud in the simulator. Retries recover the same request. Only the last four digits and initial test funding are shown.
+## Try it
 
-For a shared bill, sandbox mode replaces the leader's final demo-card confirmation with backend issuance. The bill locks while issuance is pending; **Resume card creation** retrieves the original result after an interruption. Provider cards cannot use the local simulated-payment button. Merchant transactions, live balance reconciliation, and completing recurring cycles with Marqeta cards are not implemented yet.
+### Explore in the simulator
 
-The Mac service listens only at `127.0.0.1:8787`. Physical devices use the hosted service below; they cannot access the Mac through their own localhost address. See [backend setup, API contract, and recovery details](sandbox_backend/README.md).
+```sh
+git clone https://github.com/itsfloppyhat/GroupPay.git
+cd GroupPay
+open GroupPay.xcodeproj
+```
 
-## Hosted team beta
+Select the **GroupPay** scheme and an iPhone simulator running **iOS 26 or later**, then run. The project uses Swift 6 and was built with the iOS 27.2 SDK. A compatible Xcode installation is required; the iOS app has no third-party package dependencies.
 
-The Cloud Run service lives in the dedicated Google Cloud project `group-pay-itsfloppyhat`, in `us-central1`. Its public HTTPS address is bundled as `GroupPayCardServiceURL`; no credentials are included in the app. Each tester opens **Profile → Team access**, enters the private Group Pay client code supplied by the organizer, and taps **Join**. iCloud invitation and approval steps remain the same.
+- Add `--preview` to the scheme’s launch arguments for a read-only sample dashboard.
+- In a Debug simulator build, open **Profile → Roommate recording demo** for the interactive demo. Start **Matthew · Leader** on one simulator, then **Dylan · Saved friend** on another. A third participant can approve through the guest webpage.
 
-The organizer can display only that team code locally using `python3 sandbox_backend/setup.py --show-client-token`. Share it privately with trusted testers; never share either Marqeta token. Simulator pairing can use `python3 sandbox_backend/configure_simulator.py --hosted` followed by **Profile → Team access → Check connection**.
+The recording demo runs locally, calls no iCloud or Marqeta service, and loses its session when the leader app closes. See the [demo walkthrough](docs/DEVELOPMENT.md#verification-history) for setup and browser instructions.
 
-The service scales to zero when idle and uses one small instance at most. Firestore retains issuance records and protects against duplicate funding across restarts and overlapping instances. Secret Manager holds the provider keys. New hosted cards are limited to $500 in test funds and the team has a combined limit of 100 new issuance intents per UTC day; exact retries do not consume another allowance. Existing migrated intents remain recoverable.
+### Share with real iCloud accounts
 
-A $5 monthly Cloud Run spend cap and $5 project-wide budget alerts are configured. The cap uses estimated gross Cloud Run charges, may have enforcement delay, and does not cap database, storage, builds, or other services. Light beta use is expected to cost roughly $0–$5/month, depending on traffic and free-tier availability. See [cloud setup, recovery, limits, and operating details](sandbox_backend/cloud/README.md).
+Use two physical devices running iOS 26+, separate iCloud accounts, and a developer team configured for CloudKit and push notifications. Open **Profile** to connect iCloud, set a display name, and enable notifications. Connect friends through **People → Add friend**, then create a split.
 
-## Simulation boundary
+The checked-in project uses the original developer’s signing team, bundle ID, and iCloud container. Configure your own identifiers and capabilities for a separate deployment. The [development guide](docs/DEVELOPMENT.md#test-on-two-real-accounts) covers signing, first invitations, saved groups, and CloudKit schema setup.
 
-**No real money moves.** Local simulation calls no Marqeta endpoint. With sandbox mode enabled, the backend calls only Marqeta's sandbox API and uses test funds. The app does not receive full card numbers or security codes and cannot pay a real merchant or add a card to Apple Wallet. There is no bank linking, real balance collection, KYC, settlement, refund, or withdrawal flow. Sandbox balances shown in Group Pay are snapshots at issuance, not live balances after external activity.
+### Add Marqeta test cards
 
-CloudKit enforces invitation access, but invited users have read/write access to the shared bill. Leader roles, portion claims, and payment rules are enforced by this app, not a trusted financial server. A recipient can claim an unclaimed name; confirm the intended people when inviting. Both backends check exact amounts and approvals but trust the app's identity assertions. The hosted shared access code is for a small trusted beta group and does not independently authenticate individual iCloud participants. Do not use this architecture for real funds. Production requires independently authenticated participants, server-enforced approval revisions and authorization, and reconciliation of provider callbacks.
+Choose a backend for your testing environment:
 
-Published receipt items, tax, and subtotal allocations are immutable. Each member can change their own tip and reapprove while the bill is collecting approvals; tips lock once issuance starts. To change a receipt or group membership, create a new split. The leader can revoke sharing using Apple's sharing controls. Recurring cycles require the leader to start them; CloudKit does not run a scheduled payment job. OCR is conservative English/USD and excludes discounts from line items; the review step must correct totals before sharing.
+- **On your Mac:** the [local backend](sandbox_backend/README.md) runs on loopback for simulator testing. Its setup tool stores credentials in an ignored, private `.env` file.
+- **For your team’s phones:** the [Cloud Run backend](sandbox_backend/cloud/README.md) provides HTTPS, Firestore recovery, and Secret Manager storage. Testers join through **Profile → Team access**.
 
-Cancelled shared bills require build 6 or newer on every participant’s device. Earlier builds do not understand the new cancelled status and must be updated before syncing those records.
+Marqeta credentials stay on the backend. Never add them to the app or commit them to this repository. Guest webpages require the updated hosted backend; the standalone local card server does not serve them.
 
-## Verification
+## Under the hood
 
-The following are verified locally:
+| Layer | Technology |
+| --- | --- |
+| iOS app | Swift 6, SwiftUI, iOS 26+ |
+| Receipt scanning | Vision and VisionKit, processed on-device |
+| Account and bill sharing | iCloud identities, private/shared CloudKit databases |
+| Notifications | CloudKit push registration and local notification handling |
+| Local card service | Python 3.11+, SQLite, Marqeta sandbox API |
+| Hosted service | Flask, Gunicorn, Cloud Run, Firestore, Secret Manager |
+| Guest page | HTML, CSS, and JavaScript with portion-scoped, expiring access |
+| Project configuration | XcodeGen; generated Xcode project committed for direct opening |
 
-- Signed Debug simulator and Release device builds with the iOS 27.2 SDK, iOS 26.0 minimum deployment target, and iCloud/push entitlements. Both built apps declare minimum OS version 26.0. Hosted Team access was verified in the simulator using its saved Keychain code.
-- 6,682 domain checks: cent conservation, proportional allocation, malformed amounts, identity/approval/cancellation gates, sandbox reservation/attachment, duplicate payment prevention, recurring dates and resets, and backward-compatible JSON persistence. Cancellation checks cover owner-only access, terminal state, reservation/card guards, idempotence, invalid-receipt cleanup, and preserving amounts/history.
-- 61 offline backend tests: local and hosted authentication, exact amounts, masked responses, deployment source/secret isolation, cross-process SQLite recovery, concurrent Firestore transaction behavior, quotas, legacy migration, timeout recovery, and prevention of duplicate funding. These use a mock provider.
-- Live Marqeta sandbox tests on November 14, 2026: local simulator issuance and hosted HTTPS issuance both created active cards with $10.00 in test funding. The cloud card’s available GPA balance was independently verified at $10.00; exact replay and durable lookup returned the same card. The migrated local card also remained retrievable.
-- 56 friend-invitation, saved-group, notification-copy, and shared-card-redaction checks, including cancellation notices and recipient filtering, creating a group before any bill, retrying acceptance, rejecting another recipient, and preserving invitations through persistence; 484 Swift-to-Python pricing fixtures using the actual app request encoder.
-- 34 notification delivery regression checks cover duplicate suppression, refresh/push ordering, stale snapshots, enqueue retries, own edits, account isolation, first-sync/upgrade behavior, visible bill channels, and silent background synchronization.
-- Build 5 was installed on the connected Air and iPhone. The Air successfully connected/refreshed, and Group Pay alerts were enabled in both iPhone settings and Mac mirroring settings. A local test was enqueued without an app error, but visible presentation and a fresh remote bill alert are not yet verified. The Air still showed only the two older paid bills; the pending split was on the sending phone.
-- Hosted pricing-v2 test: $10 food + $0.80 tax + $2.50 in personal tips funded exactly $13.30 on an active card; the separate fee stayed $0.11, for $13.41 total contributions. Provider GPA balance and exact retry were verified; changing the approved tip snapshot returned a conflict, and charging the fee on tips was rejected.
-- Four independent clients against real Firestore passed reservation, quota, replay, conflict, completion, and owner-fencing checks. Only isolated test records were created and removed.
-- 54 receipt checks, including estimated sales tax, subtotal fallback for order summaries, savings/rewards exclusions, preserved mismatch review, restaurant/grocery itemization, printed gratuity, and conservative category hints that avoid dining tips on retail purchases. Four native Vision checks passed on the locally supplied retail screenshot: $699.99 subtotal + $45.50 tax = $745.49, categorized as Other. The screenshot is not stored in this repository.
-- Simulator UI flow: updated five-tab navigation, personal tip preview (20% to25%, amount updates), receipt/fee breakdown, dinner receipt sample, participant entry, and new pricing review. The two-person sample showed $139.95 contributions, $21.60 tips, $1.17 fee, and portions of $69.98/$69.97. No simulator approvals or invitations were sent.
+```text
+GroupPay/                  SwiftUI screens, domain models, CloudKit services
+  Fonts/                   Caprasimo and Figtree, with their font license
+Tests/                     Swift checks and cross-language pricing fixtures
+sandbox_backend/           Local and hosted test-card services
+  guest_web/               Personal guest approval page
+  cloud/                   Deployment and operations tools
+docs/                      Development guide and project artwork
+```
 
-Run domain checks:
+## Check your changes
+
+From the repository root, run the app’s domain checks:
 
 ```sh
 xcrun swiftc -swift-version 6 GroupPay/Models.swift Tests/DomainChecks.swift -o /tmp/group-pay-domain-checks
 /tmp/group-pay-domain-checks
 ```
 
-Run receipt checks on macOS using the same parser and Vision recognizer as the app:
+Run the guest approval and notification checks:
 
 ```sh
-xcrun swiftc -swift-version 6 GroupPay/ReceiptScanner.swift Tests/ReceiptChecks.swift -o /tmp/group-pay-receipt-checks
-/tmp/group-pay-receipt-checks
+xcrun swiftc -swift-version 6 GroupPay/Models.swift Tests/GuestChecks.swift -o /tmp/group-pay-guest-checks
+/tmp/group-pay-guest-checks
+xcrun swiftc -swift-version 6 GroupPay/Models.swift GroupPay/FriendsGroups.swift Tests/NotificationChecks.swift -o /tmp/group-pay-notification-checks
+/tmp/group-pay-notification-checks
 ```
 
-Build for a device:
+For the backend and browser checks, use Python 3.11+ and Node.js:
 
 ```sh
-xcodebuild -project GroupPay.xcodeproj -scheme GroupPay -destination 'generic/platform=iOS' -allowProvisioningUpdates build
+python3 -m venv /tmp/group-pay-venv
+/tmp/group-pay-venv/bin/python -m pip install -r sandbox_backend/requirements-cloud.txt
+(cd sandbox_backend && /tmp/group-pay-venv/bin/python -m unittest test_server test_storage test_cloud_app test_guest)
+node --test sandbox_backend/test_guest_web.js
 ```
 
-The iOS 26.5 and 27.2 runtimes are installed, with Group Pay Preview and iPhone 18 Pro Max simulators configured. All builds use the same iOS 26.0 minimum deployment target. Simulator builds intentionally disable CloudKit connection and offer read-only preview and draft exploration. Add `--preview` as a launch argument to open the sample dashboard immediately.
+These backend suites use mocked provider calls and isolated test storage. Additional receipt checks, pricing-contract fixtures, device builds, and recorded validation are in the [development guide](docs/DEVELOPMENT.md#verification-history).
 
-**Next physical-device checks:** standalone friend invitation acceptance and mutual saved-friend sync across two accounts, the reusable-group invitation and inherited bills, leader-private card migration, and updated notification delivery. The earlier one-off bill workflow was confirmed working by the user. Production CloudKit schema deployment and TestFlight distribution remain separate steps.
+## Prototype boundaries
 
-After changing sandbox credentials or backend hosting, rerun the $10 connection test before testing shared bills.
+- **Approvals are consent within the demo.** They do not reserve or collect money. Bank linking, settlement, refunds, Apple Pay, and automatic card relocking are outside this build.
+- **Sharing needs an accepted connection.** Saving a name alone does not grant bill access. Reusable groups require their own initial invitation.
+- **Guest approvals sync when the organizer refreshes.** They do not directly send CloudKit notifications. The app also checks them before card creation.
+- **Recurring bills require a new decision.** Each cycle starts manually and needs fresh approvals; there is no scheduled payment job.
+- **This is for a trusted beta group.** CloudKit controls sharing access, but the backend trusts the app’s participant and approval claims. Real-money use requires independent identity verification, server-enforced authorization, and payment reconciliation.
+
+For API contracts, recovery behavior, limits, and deployment notes, start with the [development guide](docs/DEVELOPMENT.md), [local backend guide](sandbox_backend/README.md), or [cloud operations guide](sandbox_backend/cloud/README.md).
+
+---
+
+Typography: [Caprasimo](https://github.com/docrepair-fonts/caprasimo-fonts) and [Figtree](https://github.com/erikdkennedy/figtree), distributed under the [SIL Open Font License](GroupPay/Fonts/OFL.txt).

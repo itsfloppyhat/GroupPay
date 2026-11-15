@@ -7,3 +7,9 @@
 !cloud_app.py
 !cloud/
 !cloud/gunicorn.conf.py
+
+!guest.py
+!guest_web/
+!guest_web/index.html
+!guest_web/guest.js
+!guest_web/guest.css

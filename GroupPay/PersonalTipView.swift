@@ -39,7 +39,7 @@ struct PersonalTipEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 17) {
             HStack {
-                Text("Your tip").font(.headline)
+                Text("Your tip").font(GP.body(17, weight: .semibold, relativeTo: .headline))
                 Spacer()
                 Text(tip.map { Money.string(cents: $0) } ?? "—")
                     .font(.system(.title3, design: .rounded, weight: .semibold)).foregroundStyle(GP.mint)
@@ -48,7 +48,7 @@ struct PersonalTipEditor: View {
                 HStack {
                     Text("\(selection.percent)%").font(.system(.title2, design: .rounded, weight: .semibold))
                     Spacer()
-                    Text("of your \(Money.string(cents: foodCents)) subtotal").font(.caption).foregroundStyle(GP.secondary)
+                    Text("of your \(Money.string(cents: foodCents)) subtotal").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
                 Slider(value: Binding(get: { Double(selection.percent) }, set: { selection.percent = Int($0) }), in: 0...100, step: 1)
                     .tint(GP.mint).accessibilityLabel("Your tip percentage")
@@ -56,41 +56,41 @@ struct PersonalTipEditor: View {
                 HStack(spacing: 10) {
                     ForEach([0, 15, 20, 25], id: \.self) { percent in
                         Button { selection.percent = percent } label: {
-                            Text("\(percent)%").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                            Text("\(percent)%").font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).frame(maxWidth: .infinity, minHeight: 44)
                                 .foregroundStyle(selection.percent == percent ? GP.background : GP.mint)
                                 .background(selection.percent == percent ? GP.mint : GP.raised, in: Capsule())
                         }.buttonStyle(.plain).accessibilityAddTraits(selection.percent == percent ? .isSelected : [])
                     }
                 }
                 Button("Enter a tip amount") { selection.customAmount = TipSelection.decimal(tip ?? 0) }
-                    .font(.subheadline).foregroundStyle(GP.mint).frame(minHeight: 44)
+                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(minHeight: 44)
             } else {
                 TextField("Tip amount", text: Binding(get: { selection.customAmount ?? "" }, set: { selection.customAmount = $0 }))
                     .keyboardType(.decimalPad).gpField().accessibilityLabel("Your tip amount in dollars")
                 Button("Use a percentage") { selection.customAmount = nil }
-                    .font(.subheadline).foregroundStyle(GP.mint).frame(minHeight: 44)
+                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(minHeight: 44)
             }
             Divider()
             price("Your subtotal", foodCents)
             price("Tax", taxCents)
             price("Group Pay fee · 1%", feeCents)
             Text("The fee is based on your subtotal plus tax. Changing your tip won’t change it.")
-                .font(.caption).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
             if let tip {
                 HStack {
-                    Text("You approve").font(.headline)
+                    Text("You approve").font(GP.body(17, weight: .semibold, relativeTo: .headline))
                     Spacer()
                     Text(Money.string(cents: foodCents + taxCents + feeCents + tip))
                         .font(.system(.title3, design: .rounded, weight: .bold)).foregroundStyle(GP.mint)
                 }.padding(.top, 4)
             } else {
-                Text("Enter a valid tip amount.").font(.caption).foregroundStyle(GP.amber)
+                Text("Enter a valid tip amount.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.amber)
             }
         }.disabled(disabled)
     }
 
     private func price(_ title: String, _ cents: Int) -> some View {
         HStack { Text(title); Spacer(); Text(Money.string(cents: cents)).monospacedDigit() }
-            .font(.subheadline).foregroundStyle(GP.secondary)
+            .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
     }
 }

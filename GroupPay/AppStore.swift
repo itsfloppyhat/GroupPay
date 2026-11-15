@@ -35,6 +35,28 @@ final class AppStore {
             Task { await connect() }
         }
     }
+    var isSimulatorDemo: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        SimulatorDemo.shared.enabled
+        #else
+        false
+        #endif
+    }
+    var connectionLabel: String { isSimulatorDemo ? "Simulator demo · Local session" : connected ? "Connected with iCloud" : "Your people. Your plans." }
+    #if DEBUG && targetEnvironment(simulator)
+    func startSimulatorDemo(_ role: SimulatorDemoRole) async {
+        guard !busy else { return }
+        do {
+            try await SimulatorDemo.shared.start(role)
+            session = UUID()
+            bills = []; friends = []; groups = []; friendInvitations = []
+            accountID = nil; isPreview = false; error = nil; connectionIssue = nil
+            name = role.name
+            await connect()
+        } catch { self.error = error.localizedDescription }
+    }
+    #endif
+
     func acceptedShare() async {
         if busy { reconnectPending = true } else { await connect() }
     }
@@ -51,7 +73,7 @@ final class AppStore {
     var friendSuggestions: [SavedFriend] {
         var people: [String: SavedFriend] = [:]
         for member in bills.flatMap(\.members) {
-            if let id = member.accountID, id != accountID, !friends.contains(where: { $0.id == id }) {
+            if let id = member.accountID, member.guestInvitation == nil, !id.hasPrefix("guest:"), id != accountID, !friends.contains(where: { $0.id == id }) {
                 people[id] = SavedFriend(id: id, name: member.name)
             }
         }
@@ -140,6 +162,7 @@ final class AppStore {
                 guard token == session else { return }
                 notificationsEnabled = enabled
             } else if !permitted { notificationsEnabled = false }
+            _ = await syncGuestApprovals()
         } catch {
             guard token == session, revision == dataRevision else { return }
             // Account-change notifications clear private state separately. A
@@ -203,9 +226,19 @@ final class AppStore {
         busy = true
         defer { finish(token) }
         do {
+            for member in expected.members {
+                if let invitation = member.guestInvitation {
+                    _ = try await SandboxCardService.shared.guestInvitation(invitation, create: true)
+                    _ = try await SandboxCardService.shared.guestInvitation(invitation, close: true)
+                }
+            }
+            guard token == session else { return false }
             let updated = try await cloud.update(id: id, expectedAccountID: accountID) { bill in
                 guard bill.cycle == expected.cycle else {
                     throw BillError("A new cycle has started. Refresh and review it before cancelling.")
+                }
+                guard bill.members.compactMap({ $0.guestInvitation?.portion.invitationID }) == expected.members.compactMap({ $0.guestInvitation?.portion.invitationID }) else {
+                    throw BillError("Guest invitations changed. Refresh and review the split before cancelling.")
                 }
                 // Check the fresh shared record: another device may already
                 // have reserved a card since this screen was opened.
@@ -226,9 +259,10 @@ final class AppStore {
         }
     }
 
-    var sandboxIssuingEnabled: Bool { SandboxCardService.shared.enabled }
+    var sandboxIssuingEnabled: Bool { !isSimulatorDemo && SandboxCardService.shared.enabled }
 
     func confirmCard(_ id: UUID) async {
+        guard await syncGuestApprovals(billID: id) else { return }
         guard let expected = bills.first(where: { $0.id == id }) else { return }
         if !sandboxIssuingEnabled && expected.status != .issuing {
             await change(id) { try $0.confirm(accountID: $1) }
@@ -292,6 +326,104 @@ final class AppStore {
             if token == session {
                 self.error = error.localizedDescription + " Refresh this bill, then use Resume card creation if issuance has started to recover the same card."
             }
+        }
+    }
+
+    func guestLink(billID: UUID, memberID: UUID) async -> URL? {
+        guard let accountID, connected, !busy else { return nil }
+        guard isSimulatorDemo || (SandboxCardService.shared.configured &&
+              SandboxCardService.shared.baseURL.hasPrefix("https://")) else {
+            error = "Connect to your team in Profile to send a guest webpage."
+            return nil
+        }
+        let token = session
+        let endpoint: String
+        #if DEBUG && targetEnvironment(simulator)
+        endpoint = isSimulatorDemo ? SimulatorDemo.baseURL : SandboxCardService.shared.baseURL
+        #else
+        endpoint = SandboxCardService.shared.baseURL
+        #endif
+        busy = true
+        defer { finish(token) }
+        do {
+            try await SandboxCardService.shared.checkGuestAvailability()
+            guard token == session, isSimulatorDemo || SandboxCardService.shared.baseURL == endpoint else { return nil }
+            let updated = try await cloud.update(id: billID, expectedAccountID: accountID) { bill in
+                guard bill.leaderID == accountID, bill.status == .collecting,
+                      let member = bill.members.first(where: { $0.id == memberID }) else {
+                    throw BillError("Only the organizer can send a guest link while collecting approvals.")
+                }
+                if member.guestInvitation == nil {
+                    try bill.inviteGuest(memberID: memberID, accountID: accountID, baseURL: endpoint)
+                }
+            }
+            guard token == session, let invitation = updated.members.first(where: { $0.id == memberID })?.guestInvitation else { return nil }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == billID }) { bills[index] = updated }
+            let result = try await SandboxCardService.shared.guestInvitation(invitation, create: true)
+            guard token == session else { return nil }
+            guard !result.expired, !result.closed else {
+                throw BillError("This guest link has expired or closed. Remove it, then create a new link.")
+            }
+            guard let secret = result.token, secret.count == 101,
+                  secret.hasPrefix(invitation.portion.invitationID.uuidString + "."),
+                  var url = URLComponents(string: invitation.baseURL + "/guest") else {
+                throw SandboxConnectionError.invalidResponse
+            }
+            url.fragment = secret
+            return url.url
+        } catch { if token == session { self.error = error.localizedDescription }; return nil }
+    }
+
+    func removeGuestLink(billID: UUID, memberID: UUID) async {
+        guard let accountID, connected, !busy,
+              let expected = bills.first(where: { $0.id == billID }), expected.leaderID == accountID,
+              expected.status == .collecting,
+              let invitation = expected.members.first(where: { $0.id == memberID })?.guestInvitation else { return }
+        let token = session
+        busy = true
+        defer { finish(token) }
+        do {
+            // Create-or-match also recovers a link whose first publish reply was lost.
+            _ = try await SandboxCardService.shared.guestInvitation(invitation, create: true)
+            _ = try await SandboxCardService.shared.guestInvitation(invitation, close: true)
+            guard token == session else { return }
+            let updated = try await cloud.update(id: billID, expectedAccountID: accountID) { bill in
+                try bill.removeGuestInvitation(memberID: memberID, invitationID: invitation.portion.invitationID, accountID: accountID)
+            }
+            guard token == session else { return }
+            dataRevision += 1
+            if let index = bills.firstIndex(where: { $0.id == billID }) { bills[index] = updated }
+        } catch { if token == session { self.error = error.localizedDescription } }
+    }
+
+    @discardableResult private func syncGuestApprovals(billID: UUID? = nil) async -> Bool {
+        guard let accountID, connected, !busy else { return false }
+        let token = session
+        let pending = bills.filter { $0.leaderID == accountID && $0.status == .collecting && (billID == nil || $0.id == billID) }
+        guard pending.contains(where: { $0.members.contains { $0.guestInvitation != nil && !$0.approved } }) else { return true }
+        busy = true
+        defer { finish(token) }
+        do {
+            for bill in pending {
+                for member in bill.members where member.guestInvitation != nil && !member.approved {
+                    guard token == session else { return false }
+                    let result = try await SandboxCardService.shared.guestInvitation(member.guestInvitation!, create: true)
+                    guard token == session else { return false }
+                    if result.approvedTipCents != nil {
+                        let updated = try await cloud.update(id: bill.id, expectedAccountID: accountID) { fresh in
+                            try fresh.applyGuestApproval(result, accountID: accountID)
+                        }
+                        guard token == session else { return false }
+                        dataRevision += 1
+                        if let index = bills.firstIndex(where: { $0.id == bill.id }) { bills[index] = updated }
+                    }
+                }
+            }
+            return true
+        } catch {
+            if token == session { self.error = "Guest approvals couldn’t sync. " + error.localizedDescription }
+            return false
         }
     }
 

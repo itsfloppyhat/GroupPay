@@ -4,7 +4,7 @@ This deploys the existing Marqeta **sandbox** adapter to a small Cloud Run servi
 
 ## Trust boundary
 
-The HTTPS endpoint is publicly reachable. `/health` is a safe public health check; `/v1/status`, `/v1/cards`, and card lookups require the team's shared Bearer token. Browser-origin requests are rejected and CORS is not enabled.
+The HTTPS endpoint is publicly reachable. `/health` is a safe public health check; `/v1/status`, `/v1/cards`, and card lookups require the team's shared Bearer token. Browser-origin requests to team/card endpoints are rejected and CORS is not enabled. Guest pages use separate portion-scoped credentials and same-origin browser endpoints (see below).
 
 The shared token is for a **small trusted beta group**. It is not a CloudKit identity assertion. A token holder can submit approval claims and read another known bill's masked issuance result. CloudKit share permissions and app-side approval checks do not make those claims independently verifiable by this backend. Do not open this service to untrusted users or use it for real money until server-verifiable user authentication, authorization, approval records, and auditing replace that trust model.
 
@@ -88,3 +88,16 @@ On November 14, 2026, project `group-pay-itsfloppyhat` was configured with a $5/
 The local journal was migrated before cloud traffic: one completed intent and five attempt markers, verified by an idempotent second import. Keep that original journal. Four independent real Firestore clients also passed isolated concurrency, quota, replay, conflict, and ownership-fencing checks; all test records were removed.
 
 Pricing version 2 accepts per-person food, tax, tip, and fee components. Only food + tax + tips are funded onto the card. The fee is simulated accounting. The November 14, 2026 hosted check verified $13.30 funding with a separate $0.11 fee, exact replay, and rejection of altered approved tips or a fee inflated by tips.
+
+## Guest webpage routes
+
+Deploy the updated image through the existing source allowlist; `guest.py` and the three `guest_web/` assets are included. Existing Firestore permissions suffice. `/v1/status` advertises `supportsGuestApprovals` so old deployments cannot accidentally reserve unusable guest portions.
+
+- `GET /guest` plus `/guest/guest.js` and `/guest/guest.css`: public, mobile guest UI with no third-party resources, no-store caching, CSP, and no-referrer policy.
+- `POST /v1/guest-invitations`: team Bearer required; create-or-match an immutable named portion. Returns a portion-scoped token for the URL fragment.
+- `GET /v1/guest-invitations/{invitationID}`: team Bearer required; read approval for organizer synchronization.
+- `POST /v1/guest-invitations/{invitationID}/close`: team Bearer required; permanently close a link, preserving its prior result for recovery.
+- `GET /guest-api/portion`: `Guest` token required; show only the bound portion and invitation state.
+- `POST /guest-api/portion`: same `Guest` token, same origin, JSON integer `tipCents`; commit a final approval transactionally. Exact retries are idempotent; changed approvals conflict.
+
+The guest capability lasts seven days for approval. Expired/closed pages still show their original portion and state, but cannot submit. Final approval remains recoverable by the organizer after expiry. Guest tokens cannot access team/card routes, and the team token is not accepted as a guest token. Do not log authorization headers or fragments. Current trusted-team limitations remain: the team bearer is not independent organizer authentication, and there is no real-money collection. Production needs user authentication, server-owned bills and approval revisions, and payment reconciliation.

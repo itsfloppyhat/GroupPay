@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Your portion · Group Pay</title><link rel="stylesheet" href="/guest/guest.css"><script src="/guest/guest.js" defer></script></head>
+<body><main><header><span class="logo" aria-hidden="true">g.</span><strong>Group Pay</strong><span class="pill">Guest</span></header>
+<p class="eyebrow">A little less bill. A little more together.</p><h1>Your part, made easy.</h1><p class="intro">Review your portion and choose your tip. No app or account needed.</p>
+<section id="loading" role="status">Opening your invitation…</section>
+<section id="portion" hidden><p id="bill-title" class="eyebrow"></p><h2 id="greeting"></h2><p class="amount" id="total"></p><p class="currency">Your total · USD</p>
+<dl><div><dt>Subtotal</dt><dd id="food"></dd></div><div><dt>Tax</dt><dd id="tax"></dd></div><div><dt>Group Pay fee</dt><dd id="fee"></dd></div><div><dt>Your tip</dt><dd id="tip-summary"></dd></div></dl>
+<form id="approval"><fieldset id="tip-controls"><legend>Choose your tip</legend><div class="tips"><button type="button" data-tip="0">0%</button><button type="button" data-tip="15">15%</button><button type="button" data-tip="20">20%</button><button type="button" data-tip="25">25%</button></div><label for="tip">Or enter an amount ($)</label><input id="tip" inputmode="decimal" type="text" autocomplete="off" required aria-describedby="tip-help"><p id="tip-help" class="muted">The fee excludes tips. Your approval is final for this invitation.</p></fieldset><button id="approve" type="submit" class="primary">Approve my portion</button></form>
+<p id="status" role="status" tabindex="-1"></p></section>
+<p id="error" role="alert" hidden></p><button id="retry" class="primary" hidden>Try again</button>
+<footer><strong>Test mode · No real money moves</strong><p>This approves a simulated contribution. You won’t be charged. Only open a link intended for you; anyone with it can approve this portion.</p></footer></main></body></html>

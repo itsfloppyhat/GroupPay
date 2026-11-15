@@ -22,8 +22,14 @@ struct ContentView: View {
                 .badge(store.friendInvitations.filter { $0.owner.id != store.accountID }.count).tag(4)
             NavigationStack { profile }.tabItem { Label("Profile", systemImage: "person.crop.circle") }.tag(3)
         }
-        .tint(GP.mint).preferredColorScheme(.dark)
+        .tint(GP.mint).preferredColorScheme(.light)
         .environment(store)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if store.isSimulatorDemo {
+                Text("Simulator demo · \(store.name) · No real money")
+                    .font(GP.body(11, weight: .regular, relativeTo: .caption2)).foregroundStyle(GP.mint).frame(maxWidth: .infinity).padding(.vertical, 5).background(GP.background)
+            }
+        }
         .sheet(isPresented: $showingSandbox) { SandboxConnectionView() }
         .sheet(isPresented: $showingTeamAccess) { TeamAccessView() }
         .sheet(isPresented: $composing) { NewBillView { id in tab = 0; route = [id] }.environment(store) }
@@ -63,7 +69,7 @@ struct ContentView: View {
             // Reconcile visible approvals even when iOS coalesces a background push.
             guard phase == .active else { return }
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                do { try await Task.sleep(for: .seconds(store.isSimulatorDemo ? 1 : 30)) } catch { return }
                 await store.refresh()
             }
         }
@@ -74,7 +80,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 28) {
                 HStack(spacing: 10) {
                     Image(systemName: "circle.hexagongrid.fill").font(.title2).foregroundStyle(GP.mint)
-                    Text("group pay").font(.system(.title2, design: .rounded, weight: .bold)).tracking(-0.7)
+                    Text("group pay").font(GP.display(26, relativeTo: .title2)).tracking(-0.7)
                     Spacer(minLength: 8)
                     TestModeBadge()
                 }.padding(.top, 18)
@@ -85,22 +91,22 @@ struct ContentView: View {
                     metric("Active splits", value: "\(store.activeBills.count)", symbol: "person.2")
                     Rectangle().fill(GP.border).frame(width: 1, height: 48).padding(.horizontal, 20)
                     metric("Settled together", value: Money.string(cents: store.paidTotal), symbol: "checkmark.circle")
-                }.padding(.vertical, 3)
+                }.padding(20).background(GP.raised, in: RoundedRectangle(cornerRadius: 28))
                 VStack(alignment: .leading, spacing: 14) {
                     sectionHeading("Your splits", detail: store.visibleBills.isEmpty ? nil : "\(store.visibleBills.count)")
                     if store.visibleBills.isEmpty {
                         EmptyPanel(symbol: "receipt", title: "Good company. Easy splits.", subtitle: "Dinner out, groceries in, or the bills you share. Your first split starts here.")
                     }
                     ForEach(store.visibleBills) { bill in
-                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(.plain)
+                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(SoftPressButton())
                     }
                 }
                 if store.visibleBills.contains(where: { $0.recurrence != .none }) {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "repeat").foregroundStyle(GP.mint)
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Same crew. Fresh approval.").font(.subheadline.weight(.semibold))
-                            Text("Everyone gets a say each time a recurring bill comes around.").font(.caption).foregroundStyle(GP.secondary)
+                            Text("Same crew. Fresh approval.").font(GP.body(15, weight: .semibold, relativeTo: .subheadline))
+                            Text("Everyone gets a say each time a recurring bill comes around.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                         }
                     }.padding(.horizontal, 4)
                 }
@@ -113,10 +119,10 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 24) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("LESS MATH. MORE MOMENTS.").font(.caption2.weight(.bold)).tracking(1.2)
+                    Text("LESS MATH. MORE MOMENTS.").font(GP.body(11, weight: .bold, relativeTo: .caption2)).tracking(1.2)
                     Text("Life’s better\nshared.")
-                        .font(.system(size: heroTitleSize, weight: .semibold, design: .rounded)).tracking(-1.2).fixedSize(horizontal: false, vertical: true)
-                    Text("One bill. Everyone’s part.").font(.subheadline).foregroundStyle(GP.background.opacity(0.7))
+                        .font(.custom("Caprasimo-Regular", fixedSize: heroTitleSize)).tracking(-1.2).fixedSize(horizontal: false, vertical: true)
+                    Text("One bill. Everyone’s part.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if !dynamicTypeSize.isAccessibilitySize {
                     ReceiptIllustration().frame(width: 94, height: 130).accessibilityHidden(true)
@@ -124,17 +130,17 @@ struct ContentView: View {
             }
             Button { composing = true } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "plus").font(.body.weight(.semibold))
-                    Text("Start a split").font(.body.weight(.semibold))
+                    Image(systemName: "plus").font(GP.body(17, weight: .semibold, relativeTo: .body))
+                    Text("Start a split").font(GP.body(17, weight: .semibold, relativeTo: .body))
                     Spacer()
-                    Image(systemName: "arrow.up.right").font(.body.weight(.medium))
-                }.padding(18).foregroundStyle(GP.mint).background(GP.background, in: RoundedRectangle(cornerRadius: 18))
-            }.buttonStyle(.plain).accessibilityIdentifier("startSplit")
-        }.padding(24).foregroundStyle(GP.background)
+                    Image(systemName: "arrow.up.right").font(GP.body(17, weight: .medium, relativeTo: .body))
+                }.padding(18).foregroundStyle(GP.raised).background(GP.mint, in: Capsule())
+            }.buttonStyle(SoftPressButton()).accessibilityIdentifier("startSplit")
+        }.padding(24).foregroundStyle(GP.text)
             .background {
                 ZStack(alignment: .topTrailing) {
-                    LinearGradient(colors: [GP.mint, Color(red: 0.68, green: 0.85, blue: 0.57)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Circle().fill(.white.opacity(0.12)).frame(width: 240).offset(x: 90, y: -100)
+                    LinearGradient(colors: [GP.peach, GP.surface], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Circle().fill(GP.accent.opacity(0.12)).frame(width: 240).offset(x: 90, y: -100)
                 }.clipShape(RoundedRectangle(cornerRadius: 30))
             }
     }
@@ -144,34 +150,34 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Image(systemName: store.isPreview ? "sparkles" : "person.2.badge.plus").font(.title3).foregroundStyle(GP.mint)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(store.isPreview ? "A little look around" : "Bring your people along").font(.subheadline.weight(.semibold)).foregroundStyle(GP.text)
-                    Text(store.isPreview ? "Sample bills · Read only" : "Connect iCloud to share your first bill.").font(.caption).foregroundStyle(GP.secondary)
+                    Text(store.isPreview ? "A little look around" : "Bring your people along").font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.text)
+                    Text(store.isPreview ? "Sample bills · Read only" : store.connected ? "Create a split to get started." : "Connect iCloud to share your first bill.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
                 Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(GP.secondary)
+                Image(systemName: "chevron.right").font(GP.body(12, weight: .semibold, relativeTo: .caption)).foregroundStyle(GP.secondary)
             }.padding(16).background(GP.surface, in: RoundedRectangle(cornerRadius: 18))
         }.buttonStyle(.plain)
     }
 
     private func metric(_ label: String, value: String, symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(label, systemImage: symbol).font(.caption).foregroundStyle(GP.secondary)
-            Text(value).font(.system(.title, design: .rounded, weight: .semibold)).tracking(-0.7).lineLimit(1).minimumScaleFactor(0.65)
+            Label(label, systemImage: symbol).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
+            Text(value).font(GP.display(30)).contentTransition(.numericText()).gpAnimate(value).tracking(-0.7).lineLimit(1).minimumScaleFactor(0.65)
         }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .combine)
     }
 
     private func sectionHeading(_ title: String, detail: String? = nil) -> some View {
         HStack {
-            Text(title).font(.title3.weight(.semibold)).tracking(-0.3)
+            Text(title).font(GP.display(22, relativeTo: .title3)).tracking(-0.3)
             Spacer()
-            if let detail { Text(detail).font(.caption.weight(.medium)).foregroundStyle(GP.secondary) }
+            if let detail { Text(detail).font(GP.body(12, weight: .medium, relativeTo: .caption)).foregroundStyle(GP.secondary) }
         }
     }
 
     private var activity: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("A little nudge. Then you’re all set.").font(.subheadline).foregroundStyle(GP.secondary)
+                Text("A little nudge. Then you’re all set.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                 syncIssue
                 if store.pendingBills.isEmpty {
                     if store.connectionIssue == nil {
@@ -180,7 +186,7 @@ struct ContentView: View {
                 } else {
                     sectionHeading("Ready for your review", detail: "\(store.pendingBills.count)")
                     ForEach(store.pendingBills) { bill in
-                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(.plain)
+                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(SoftPressButton())
                     }
                 }
                 if !store.notificationsEnabled && store.connected {
@@ -188,8 +194,8 @@ struct ContentView: View {
                         HStack(spacing: 14) {
                             IconTile(symbol: "bell")
                             VStack(alignment: .leading, spacing: 5) {
-                                Text("Never miss your turn").font(.headline)
-                                Text("A heads-up when your group needs you.").font(.caption).foregroundStyle(GP.secondary)
+                                Text("Never miss your turn").font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                                Text("A heads-up when your group needs you.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             }
                         }
                         Button(store.notificationsDenied ? "Open notification settings" : "Turn on notifications") { Task { await store.enableNotifications() } }.buttonStyle(PrimaryButton())
@@ -199,7 +205,7 @@ struct ContentView: View {
                 if !reviewedBills.isEmpty {
                     sectionHeading("With your group")
                     ForEach(reviewedBills) { bill in
-                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(.plain)
+                        NavigationLink { BillDetailView(billID: bill.id) } label: { BillRow(bill: bill) }.buttonStyle(SoftPressButton())
                     }
                 }
                 cancelledSplits
@@ -224,7 +230,7 @@ struct ContentView: View {
                 }.padding(.top, 12)
             } label: {
                 Label("Cancelled splits · \(store.cancelledBills.count)", systemImage: "archivebox")
-                    .font(.subheadline).foregroundStyle(GP.secondary)
+                    .font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
             }.tint(GP.secondary)
         }
     }
@@ -232,10 +238,10 @@ struct ContentView: View {
     @ViewBuilder private var syncIssue: some View {
         if store.connected, let issue = store.connectionIssue {
             Panel {
-                Label("Updates paused", systemImage: "icloud.slash").font(.headline).foregroundStyle(GP.amber)
-                Text(issue).font(.subheadline).foregroundStyle(GP.secondary)
+                Label("Updates paused", systemImage: "icloud.slash").font(GP.body(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(GP.amber)
+                Text(issue).font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                 Button("Try refreshing") { Task { await store.refresh() } }
-                    .font(.subheadline.weight(.semibold)).disabled(store.busy || store.refreshing)
+                    .font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).disabled(store.busy || store.refreshing)
             }
         }
     }
@@ -245,7 +251,7 @@ struct ContentView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
-                    Text("One card for every shared plan.").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("One card for every shared plan.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                     Spacer(minLength: 8)
                     TestModeBadge()
                 }
@@ -253,8 +259,8 @@ struct ContentView: View {
                     VStack(spacing: 24) {
                         CardIllustration().frame(height: 190).padding(.top, 28).accessibilityHidden(true)
                         VStack(spacing: 10) {
-                            Text("Good things take a group.").font(.title2.weight(.semibold)).tracking(-0.5)
-                            Text("Cards for bills you lead appear here. Everyone else can follow the bill’s status in their inbox.").font(.subheadline).foregroundStyle(GP.secondary).lineSpacing(4)
+                            Text("Good things take a group.").font(GP.display(26, relativeTo: .title2)).tracking(-0.5)
+                            Text("Cards for bills you lead appear here. Everyone else can follow the bill’s status in their inbox.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary).lineSpacing(4)
                         }.multilineTextAlignment(.center).padding(.horizontal, 12)
                         Button("Start a split") { composing = true }.buttonStyle(PrimaryButton()).padding(.top, 6)
                     }.padding(.bottom, 12)
@@ -263,7 +269,7 @@ struct ContentView: View {
                     NavigationLink { BillDetailView(billID: bill.id) } label: { VirtualCardView(bill: bill) }.buttonStyle(.plain)
                 }
                 Label("Test cards only. No real money moves.", systemImage: "leaf")
-                    .font(.caption).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.top, 8)
+                    .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.top, 8)
             }.padding(24)
         }.navigationTitle("Cards").navigationBarTitleDisplayMode(.large).gpPage()
     }
@@ -274,26 +280,37 @@ struct ContentView: View {
                 HStack(spacing: 18) {
                     Avatar(name: store.name, size: 72)
                     VStack(alignment: .leading, spacing: 7) {
-                        Text(store.name.isEmpty ? "Your profile" : store.name).font(.system(.title, design: .rounded, weight: .semibold)).tracking(-0.7)
-                        Label(store.connected ? "Connected with iCloud" : "Your people. Your plans.", systemImage: store.connected ? "checkmark.icloud" : "person.2")
-                            .font(.caption).foregroundStyle(GP.secondary)
+                        Text(store.name.isEmpty ? "Your profile" : store.name).font(GP.display(30)).tracking(-0.7)
+                        Label(store.connectionLabel, systemImage: store.connected ? "checkmark.icloud" : "person.2")
+                            .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     }
                 }.padding(.vertical, 8)
+                #if DEBUG && targetEnvironment(simulator)
                 Panel {
-                    Text("Display name").font(.subheadline.weight(.semibold))
+                    Label("Roommate recording demo", systemImage: "play.rectangle").font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                    Text("Start Matthew on the first simulator, then Dylan on the second. Curtis uses Safari on the third. Bills and approvals stay in this Mac’s temporary demo session.")
+                        .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
+                    Button("Matthew · Leader") { Task { await store.startSimulatorDemo(.matthew); if store.connected { tab = 0 } } }
+                        .buttonStyle(PrimaryButton()).disabled(store.busy)
+                    Button("Dylan · Saved friend") { Task { await store.startSimulatorDemo(.dylan); if store.connected { tab = 0 } } }
+                        .buttonStyle(PrimaryButton()).disabled(store.busy)
+                }
+                #endif
+                Panel {
+                    Text("Display name").font(GP.body(15, weight: .semibold, relativeTo: .subheadline))
                     TextField("What should we call you?", text: $store.name).gpField().textContentType(.name)
                         .onChange(of: store.name) { _, value in UserDefaults.standard.set(value, forKey: "profileName") }
                     if !store.connected {
-                        Text("Use iCloud to invite friends and keep your shared bills together.").font(.subheadline).foregroundStyle(GP.secondary)
+                        Text("Use iCloud to invite friends and keep your shared bills together.").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                         Button(store.busy ? "Connecting…" : "Connect iCloud") { Task { await store.connect() } }.buttonStyle(PrimaryButton()).disabled(store.busy)
                         if let issue = store.connectionIssue {
-                            Text(issue).font(.caption).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(issue).font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                         if !store.isPreview {
-                            Button("Take a look around") { store.preview(); tab = 0 }.font(.subheadline.weight(.medium)).foregroundStyle(GP.mint).frame(maxWidth: .infinity).padding(.vertical, 6)
+                            Button("Take a look around") { store.preview(); tab = 0 }.font(GP.body(15, weight: .medium, relativeTo: .subheadline)).foregroundStyle(GP.mint).frame(maxWidth: .infinity).padding(.vertical, 6)
                         }
                     } else if let synced = store.lastSynced {
-                        Label("Updated \(synced.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.circle").font(.caption).foregroundStyle(GP.secondary)
+                        Label("Updated \(synced.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.circle").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                     }
                 }
                 VStack(alignment: .leading, spacing: 14) {
@@ -302,8 +319,8 @@ struct ContentView: View {
                         HStack(spacing: 14) {
                             IconTile(symbol: "bell")
                             VStack(alignment: .leading, spacing: 5) {
-                                Text("Notifications").font(.headline)
-                                Text(store.notificationsEnabled ? "You’re in the loop." : "Know when it’s your turn to approve.").font(.caption).foregroundStyle(GP.secondary)
+                                Text("Notifications").font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                                Text(store.notificationsEnabled ? "You’re in the loop." : "Know when it’s your turn to approve.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             }
                             Spacer(minLength: 0)
                             if store.notificationsEnabled { Image(systemName: "checkmark.circle.fill").foregroundStyle(GP.mint) }
@@ -311,25 +328,25 @@ struct ContentView: View {
                         if !store.notificationsEnabled {
                             if store.connected {
                                 Button(store.notificationsDenied ? "Open notification settings" : "Turn on notifications") { Task { await store.enableNotifications() } }
-                                    .font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
+                                    .font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                             } else {
-                                Text("Connect iCloud to enable").font(.caption).foregroundStyle(GP.secondary)
+                                Text("Connect iCloud to enable").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             }
                         } else {
                             Button(store.sendingNotificationTest ? "Sending…" : "Send test notification") {
                                 Task { await store.sendTestNotification() }
-                            }.font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
+                            }.font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                                 .disabled(store.sendingNotificationTest).accessibilityIdentifier("sendTestNotification")
                             Text("Check where alerts appear on your phone or mirrored Mac.")
-                                .font(.caption).foregroundStyle(GP.secondary)
+                                .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                         }
                     }
                     Panel {
                         HStack(spacing: 14) {
                             IconTile(symbol: "creditcard")
                             VStack(alignment: .leading, spacing: 5) {
-                                Text("A space to try things out").font(.headline)
-                                Text("All cards and payments use test money.").font(.caption).foregroundStyle(GP.secondary)
+                                Text("A space to try things out").font(GP.body(17, weight: .semibold, relativeTo: .headline))
+                                Text("All cards and payments use test money.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                             }
                         }
                         TestModeBadge(label: sandbox.enabled ? "Test cards enabled" : "Test mode")
@@ -338,9 +355,9 @@ struct ContentView: View {
                                 HStack {
                                     Text("Team access")
                                     Spacer()
-                                    Image(systemName: "chevron.right").font(.caption)
+                                    Image(systemName: "chevron.right").font(GP.body(12, weight: .regular, relativeTo: .caption))
                                 }.frame(minHeight: 44)
-                            }.font(.subheadline.weight(.semibold)).foregroundStyle(GP.mint)
+                            }.font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).foregroundStyle(GP.mint)
                         }
                     }
                 }
@@ -350,14 +367,14 @@ struct ContentView: View {
                         HStack {
                             Label("Card connection", systemImage: "slider.horizontal.3")
                             Spacer()
-                            Image(systemName: "chevron.right").font(.caption)
-                        }.font(.subheadline).padding(.vertical, 14)
+                            Image(systemName: "chevron.right").font(GP.body(12, weight: .regular, relativeTo: .caption))
+                        }.font(GP.body(15, weight: .regular, relativeTo: .subheadline)).padding(.vertical, 14)
                     }.foregroundStyle(GP.mint)
                 } label: {
-                    Text("Advanced settings").font(.subheadline).foregroundStyle(GP.secondary)
+                    Text("Advanced settings").font(GP.body(15, weight: .regular, relativeTo: .subheadline)).foregroundStyle(GP.secondary)
                 }.tint(GP.secondary).padding(.horizontal, 4)
                 #endif
-                Text("A little easier, together.").font(.caption).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.bottom, 8)
+                Text("A little easier, together.").font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary).frame(maxWidth: .infinity).padding(.bottom, 8)
             }.padding(24)
         }.navigationTitle("Profile").navigationBarTitleDisplayMode(.large).gpPage()
     }
@@ -370,9 +387,9 @@ struct BillRow: View {
             HStack(alignment: .center, spacing: 14) {
                 IconTile(symbol: bill.category.systemImage, size: 46)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(bill.title).font(.headline).foregroundStyle(GP.text)
+                    Text(bill.title).font(GP.body(17, weight: .semibold, relativeTo: .headline)).foregroundStyle(GP.text)
                     Text(bill.recurrence == .none ? bill.createdAt.formatted(date: .abbreviated, time: .omitted) : "\(bill.recurrence.rawValue) · \(bill.cycle)")
-                        .font(.caption).foregroundStyle(GP.secondary)
+                        .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.secondary)
                 }
                 Spacer(minLength: 4)
                 Text(Money.string(cents: bill.totalCents)).font(.system(.headline, design: .rounded)).foregroundStyle(GP.text).lineLimit(1).minimumScaleFactor(0.7)
@@ -394,7 +411,7 @@ struct BillRow: View {
                 ForEach(Array(bill.members.prefix(3).enumerated()), id: \.element.id) { index, member in Avatar(name: member.name, index: index, size: 28) }
             }
             Text(bill.status == .cancelled ? "No payment due" : "\(bill.approvedCount) of \(bill.members.count) approved")
-                .font(.caption2).foregroundStyle(GP.secondary)
+                .font(GP.body(11, weight: .regular, relativeTo: .caption2)).foregroundStyle(GP.secondary)
         }
     }
 }
@@ -404,9 +421,9 @@ struct VirtualCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 30) {
             HStack {
-                Label("group pay", systemImage: "circle.hexagongrid.fill").font(.system(.headline, design: .rounded))
+                Label("group pay", systemImage: "circle.hexagongrid.fill").font(GP.display(21, relativeTo: .headline))
                 Spacer()
-                Text("Test card").font(.caption2.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 6)
+                Text("Test card").font(GP.body(11, weight: .semibold, relativeTo: .caption2)).padding(.horizontal, 10).padding(.vertical, 6)
                     .background(GP.background.opacity(0.08), in: Capsule())
             }
             HStack(alignment: .center) {
@@ -416,18 +433,18 @@ struct VirtualCardView: View {
             }
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(bill.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text(bill.title).font(GP.body(15, weight: .semibold, relativeTo: .subheadline)).lineLimit(2)
                     Text(bill.status == .paid ? "Settled together" : bill.card?.provider == "marqetaSandbox" ? "Initial test balance" : "Ready for this bill")
-                        .font(.caption).foregroundStyle(GP.background.opacity(0.65))
+                        .font(GP.body(12, weight: .regular, relativeTo: .caption)).foregroundStyle(GP.raised.opacity(0.85))
                 }
                 Spacer(minLength: 12)
                 Text(Money.string(cents: bill.card?.remainingCents ?? 0))
-                    .font(.system(.title, design: .rounded, weight: .semibold)).tracking(-0.8).lineLimit(1).minimumScaleFactor(0.7)
+                    .font(GP.display(30)).tracking(-0.8).lineLimit(1).minimumScaleFactor(0.7)
             }
-        }.padding(26).foregroundStyle(GP.background)
+        }.padding(26).foregroundStyle(GP.raised)
             .background {
                 ZStack(alignment: .topTrailing) {
-                    LinearGradient(colors: [GP.mint, Color(red: 0.59, green: 0.79, blue: 0.59)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    LinearGradient(colors: [GP.mint, GP.sage], startPoint: .topLeading, endPoint: .bottomTrailing)
                     Circle().stroke(.white.opacity(0.12), lineWidth: 32).frame(width: 230).offset(x: 80, y: -105)
                     Circle().stroke(.white.opacity(0.09), lineWidth: 1).frame(width: 320).offset(x: 115, y: -140)
                 }.clipShape(RoundedRectangle(cornerRadius: 28))
@@ -439,21 +456,21 @@ struct VirtualCardView: View {
 private struct ReceiptIllustration: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 14).fill(GP.background.opacity(0.08)).frame(width: 80, height: 104).rotationEffect(.degrees(12)).offset(x: 8, y: 5)
+            RoundedRectangle(cornerRadius: 14).fill(GP.text.opacity(0.08)).frame(width: 80, height: 104).rotationEffect(.degrees(12)).offset(x: 8, y: 5)
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: "fork.knife").font(.title3).frame(maxWidth: .infinity)
-                Rectangle().fill(GP.background.opacity(0.1)).frame(height: 1)
+                Rectangle().fill(GP.text.opacity(0.1)).frame(height: 1)
                 ForEach(0..<3) { index in
                     HStack {
-                        Capsule().fill(GP.background.opacity(0.16)).frame(width: index == 1 ? 22 : 32, height: 4)
+                        Capsule().fill(GP.text.opacity(0.16)).frame(width: index == 1 ? 22 : 32, height: 4)
                         Spacer(minLength: 4)
-                        Circle().fill(GP.background.opacity(0.24)).frame(width: 4, height: 4)
+                        Circle().fill(GP.text.opacity(0.24)).frame(width: 4, height: 4)
                     }
                 }
-            }.padding(15).frame(width: 86).background(Color(red: 0.96, green: 0.98, blue: 0.86), in: RoundedRectangle(cornerRadius: 14))
-                .rotationEffect(.degrees(-8)).shadow(color: GP.background.opacity(0.12), radius: 12, x: 0, y: 8)
-            Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(GP.mint)
-                .frame(width: 30, height: 30).background(GP.background, in: Circle()).offset(x: 34, y: 53)
+            }.padding(15).frame(width: 86).background(GP.raised, in: RoundedRectangle(cornerRadius: 14))
+                .rotationEffect(.degrees(-8)).shadow(color: GP.text.opacity(0.12), radius: 12, x: 0, y: 8)
+            Image(systemName: "checkmark").font(GP.body(12, weight: .bold, relativeTo: .caption)).foregroundStyle(GP.raised)
+                .frame(width: 30, height: 30).background(GP.sage, in: Circle()).offset(x: 34, y: 53)
         }
     }
 }

@@ -9,3 +9,9 @@
 !cloud/gunicorn.conf.py
 !cloudbuild.yaml
 !.dockerignore
+
+!guest.py
+!guest_web/
+!guest_web/index.html
+!guest_web/guest.js
+!guest_web/guest.css

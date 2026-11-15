@@ -7,13 +7,16 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "6"
+    CURRENT_PROJECT_VERSION: "7"
 targets:
   GroupPay:
     type: application
     platform: iOS
     sources:
       - GroupPay
+      - path: sandbox_backend/guest_web
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.itsfloppyhat.GroupPay
@@ -33,6 +36,7 @@ targets:
       path: GroupPay/Info.plist
       properties:
         GroupPayCardServiceURL: https://group-pay-sandbox-d3md3qdhcq-uc.a.run.app
+        UIAppFonts: [Caprasimo-Regular.ttf, Figtree-Regular.ttf, Figtree-SemiBold.ttf, Figtree-Bold.ttf]
         CKSharingSupported: true
         UIBackgroundModes: [fetch, remote-notification]
         NSAppTransportSecurity:
